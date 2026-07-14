@@ -1,0 +1,23 @@
+{
+  "decoy_types": {
+    "financial_report": {
+      "keywords": ["finance", "budget", "payroll", "salaires", "tresorerie", "bilan"],
+      "extensions": [".xlsx", ".docx"],
+      "llm_persona": "Tu es un contrôleur de gestion senior dans une entreprise marocaine de taille moyenne. Tu rédiges des documents financiers internes précis, sobres et confidentiels.",
+      "corpus_dir": "corpus/financial"
+    },
+    "hr_document": {
+      "keywords": ["hr", "rh", "contrat", "contrats", "salaire", "employe", "onboarding"],
+      "extensions": [".docx"],
+      "llm_persona": "Tu es un responsable des ressources humaines dans une entreprise de 200 personnes. Tu rédiges des documents RH internes clairs et formels.",
+      "corpus_dir": "corpus/hr"
+    },
+    "technical_config": {
+      "keywords": ["config", "credentials", "api_keys", "deploy", "backup", "secret"],
+      "extensions": [".yaml", ".txt"],
+      "llm_persona": "Tu es un administrateur système DevOps senior. Tu rédiges des notes de déploiement et des configurations techniques internes.",
+      "corpus_dir": "corpus/technical"
+    }
+  },
+  "default_decoy_type": "financial_report"
+}

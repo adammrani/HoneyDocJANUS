@@ -1,0 +1,10 @@
+CHANGELOG INFRASTRUCTURE — RELEASE 2026.06
+Équipe Systèmes & Réseaux — Usage interne
+
+- Migration des bases de données vers la version 15 du moteur, avec réplication en continu.
+- Renforcement de la segmentation réseau entre les VLAN applicatif et données.
+- Rotation des clés d'accès aux services de stockage objet et réduction des durées de vie.
+- Mise en place de la journalisation centralisée pour les accès aux partages sensibles.
+- Correctif de sécurité appliqué sur la passerelle VPN (montée de version mineure).
+- Durcissement des configurations SSH : désactivation de l'authentification par mot de passe
+  sur les serveurs de production, accès par clé uniquement via le bastion.

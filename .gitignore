@@ -1,0 +1,42 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Données générées
+data/
+logs/
+generated_docs/
+deployed_docs/
+samples/
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl
+
+# Modèles et caches
+.cache/
+models/
+huggingface/
+
+# Système
+.DS_Store
+Thumbs.db
+
+# Documents générés
+*.docx
+*.xlsx
+*.pdf
+*.zip

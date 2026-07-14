@@ -1,0 +1,12 @@
+NOTES DE DÉPLOIEMENT — PLATEFORME INTERNE v3.2
+Équipe Infrastructure & DevOps — Interne
+
+Le déploiement en production suit une stratégie blue-green sur le cluster Kubernetes
+interne. La bascule de trafic est pilotée via l'ingress après validation des sondes de
+santé (readiness et liveness). Le rollback automatique se déclenche si le taux d'erreur
+5xx dépasse 2 % sur une fenêtre de trois minutes.
+
+Les secrets applicatifs sont gérés via le coffre interne et injectés au démarrage des pods.
+Aucune credential ne doit figurer en clair dans les manifestes. La chaîne CI/CD exécute
+les tests, l'analyse SAST et le scan de dépendances avant toute promotion vers la production.
+Fenêtre de maintenance planifiée : mardi 02h00–04h00.

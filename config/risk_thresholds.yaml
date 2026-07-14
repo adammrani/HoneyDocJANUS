@@ -1,0 +1,19 @@
+# Seuils de décision basés sur le rule.level Wazuh des alertes suspectes.
+# Politique de réponse graduée :
+#   ignore   : bruit, aucune action
+#   simple   : déployer un leurre narratif simple (sans couches JANUS)
+#   janus    : déployer un leurre complet (narrative + CI1 + CI3)
+thresholds:
+  ignore:
+    max_level: 7
+  simple:
+    min_level: 8
+    max_level: 10
+  janus:
+    min_level: 11
+
+# Nombre minimal d'alertes suspectes pour élever le profil de menace.
+profile_escalation:
+  medium: 1
+  high: 8
+  critical: 20

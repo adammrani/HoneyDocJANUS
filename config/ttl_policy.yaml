@@ -1,0 +1,9 @@
+# Durée de vie (heures) des honey-documents par type avant rotation.
+ttl_hours:
+  financial_report: 72
+  hr_document: 120
+  technical_config: 48
+  default: 72
+
+# Intervalle de vérification de la rotation (minutes).
+rotation_check_interval_minutes: 30

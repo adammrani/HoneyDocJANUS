@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    command: python src/main.py
+    ports:
+      - "8000:8000"   # FastAPI
+      - "2222:2222"   # decoy SSH
+      - "8080:8080"   # decoy HTTP
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./corpus:/app/corpus
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    command: streamlit run src/alerting/dashboard.py --server.address=0.0.0.0 --server.port=8501
+    ports:
+      - "8501:8501"   # Streamlit
+    env_file:
+      - .env
+    environment:
+      - CALLBACK_BASE_URL=http://api:8000
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./corpus:/app/corpus
+    depends_on:
+      - api
+    restart: unless-stopped

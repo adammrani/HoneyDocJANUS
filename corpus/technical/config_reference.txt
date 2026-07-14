@@ -1,0 +1,12 @@
+CONFIGURATION DE RÉFÉRENCE — SERVICES INTERNES
+Documentation technique — Ne pas diffuser hors équipe
+
+Les services exposés en interne communiquent exclusivement via le réseau privé.
+Le reverse proxy assure la terminaison TLS et l'authentification mutuelle entre services.
+Les endpoints d'administration sont restreints au sous-réseau d'exploitation et protégés
+par liste d'accès. Les sauvegardes chiffrées sont réalisées quotidiennement et testées
+mensuellement via une procédure de restauration documentée.
+
+La supervision repose sur la collecte de métriques et de journaux applicatifs. Les alertes
+critiques sont routées vers l'astreinte. Toute modification de configuration passe par une
+revue de pair et est tracée dans le dépôt d'infrastructure-as-code.
