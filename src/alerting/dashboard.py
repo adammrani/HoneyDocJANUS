@@ -73,7 +73,9 @@ def page_alerts() -> None:
                 "IP": a.get("src_ip") or "-",
                 "Pays": a.get("geo_country") or "-",
                 "Ville": a.get("geo_city") or "-",
-                "OS": a.get("os_guess") or "-",
+                "OS déclaré/estimé": a.get("os_guess") or "Inconnu",
+                "Source OS": a.get("os_evidence_source") or "none",
+                "Confiance OS": a.get("os_confidence") or "none",
                 "Outil / Navigateur": a.get("browser_guess") or "-",
             }
             for a in alerts

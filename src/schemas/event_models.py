@@ -3,7 +3,8 @@ src/schemas/event_models.py
 Pydantic models for the FastAPI request/response payloads.
 """
 
-from typing import Optional
+from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,14 @@ class GenerateRequest(BaseModel):
     ttl_hours: int = 72
     enable_janus: bool = True
     enable_ci3: bool = True
+    output_format: Literal["docx", "xlsx"] = "docx"
+    scenario: str = ""
+    company_name: Optional[str] = Field(default=None, max_length=120)
+    fiscal_year: int = Field(
+        default_factory=lambda: datetime.now().year,
+        ge=2020,
+        le=2100,
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -26,6 +35,14 @@ class GenerateResponse(BaseModel):
     token_url: str
     deployed_path: str
     message: str
+    file_format: str = "docx"
+    scenario: str = ""
+    sha256: str = ""
+    token_activation: str = "automatic"
+    token_provider: str = "local"
+    token_type: str = "web"
+    canary_webhook_enabled: bool = False
+    detection_layers: list[str] = Field(default_factory=list)
 
 
 class CanarytokenCallback(BaseModel):
@@ -51,4 +68,7 @@ class AlertSummary(BaseModel):
     geo_country: Optional[str] = None
     geo_city: Optional[str] = None
     os_guess: Optional[str] = None
+    os_evidence_source: str = "none"
+    os_confidence: str = "none"
+    os_scope: str = "unknown"
     browser_guess: Optional[str] = None

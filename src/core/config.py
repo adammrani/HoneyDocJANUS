@@ -26,6 +26,23 @@ def _abs(path: str) -> str:
     return os.path.join(PROJECT_ROOT, path)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _env_csv(name: str, default: str) -> tuple[str, ...]:
+    """Lit une liste séparée par des virgules en supprimant les valeurs vides."""
+
+    return tuple(
+        item.strip()
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    )
+
+
 class Settings:
     """Runtime configuration, populated from environment variables."""
 
@@ -37,9 +54,22 @@ class Settings:
         # ── Canarytokens ──────────────────────────
         self.CANARYTOKEN_SERVER: str = os.getenv(
             "CANARYTOKEN_SERVER", "https://canarytokens.org"
+        ).rstrip("/")
+        self.CANARYTOKEN_API_PATH: str = os.getenv(
+            "CANARYTOKEN_API_PATH",
+            "/d3aece8093b71007b5ccfedad91ebb11",
         )
+        if not self.CANARYTOKEN_API_PATH.startswith("/"):
+            self.CANARYTOKEN_API_PATH = f"/{self.CANARYTOKEN_API_PATH}"
         self.CANARYTOKEN_EMAIL: str = os.getenv(
             "CANARYTOKEN_EMAIL", "alerts@example.com"
+        )
+        self.CANARYTOKEN_TIMEOUT_SECONDS: float = float(
+            os.getenv("CANARYTOKEN_TIMEOUT_SECONDS", "10")
+        )
+        self.CANARYTOKEN_WEBHOOK_ENABLED: bool = _env_bool(
+            "CANARYTOKEN_WEBHOOK_ENABLED",
+            False,
         )
 
         # ── Network / callback ────────────────────
@@ -54,6 +84,79 @@ class Settings:
         self.DECOY_DROP_PATH: str = _abs(
             os.getenv("DECOY_DROP_PATH", "data/deployed_docs")
         )
+        self.JANUS_DEPLOY_ROOT: str = _abs(
+            os.getenv("JANUS_DEPLOY_ROOT", "data/shared")
+        )
+
+        # ── Wazuh Indexer automatic collection ──
+        self.WAZUH_AUTO_COLLECT_ENABLED: bool = _env_bool(
+            "WAZUH_AUTO_COLLECT_ENABLED",
+            False,
+        )
+        self.WAZUH_INDEXER_URL: str = os.getenv(
+            "WAZUH_INDEXER_URL",
+            "https://localhost:9200",
+        ).rstrip("/")
+        self.WAZUH_INDEXER_USERNAME: str = os.getenv(
+            "WAZUH_INDEXER_USERNAME",
+            "",
+        )
+        self.WAZUH_INDEXER_PASSWORD: str = os.getenv(
+            "WAZUH_INDEXER_PASSWORD",
+            "",
+        )
+        self.WAZUH_INDEX_PATTERN: str = os.getenv(
+            "WAZUH_INDEX_PATTERN",
+            "wazuh-alerts-4.x-*",
+        )
+        self.WAZUH_RULE_ID: str = os.getenv("WAZUH_RULE_ID", "100100")
+        self.WAZUH_ADDITIONAL_RULE_IDS: tuple[str, ...] = _env_csv(
+            "WAZUH_ADDITIONAL_RULE_IDS", "100101,100102,100103,100104"
+        )
+        self.WAZUH_VERIFY_SSL: bool = _env_bool("WAZUH_VERIFY_SSL", True)
+        wazuh_ca_cert = os.getenv("WAZUH_CA_CERT_PATH", "").strip()
+        self.WAZUH_CA_CERT_PATH: str = (
+            _abs(wazuh_ca_cert) if wazuh_ca_cert else ""
+        )
+        self.WAZUH_POLL_INTERVAL_SECONDS: float = float(
+            os.getenv("WAZUH_POLL_INTERVAL_SECONDS", "5")
+        )
+        self.WAZUH_INITIAL_LOOKBACK_MINUTES: int = int(
+            os.getenv("WAZUH_INITIAL_LOOKBACK_MINUTES", "15")
+        )
+        self.WAZUH_OVERLAP_SECONDS: int = int(
+            os.getenv("WAZUH_OVERLAP_SECONDS", "120")
+        )
+        self.WAZUH_EVENT_SETTLE_SECONDS: int = int(
+            os.getenv("WAZUH_EVENT_SETTLE_SECONDS", "3")
+        )
+        self.WAZUH_BATCH_SIZE: int = int(
+            os.getenv("WAZUH_BATCH_SIZE", "200")
+        )
+        self.WAZUH_REQUEST_TIMEOUT_SECONDS: float = float(
+            os.getenv("WAZUH_REQUEST_TIMEOUT_SECONDS", "10")
+        )
+        self.WAZUH_DEPLOYMENT_GRACE_SECONDS: float = float(
+            os.getenv("WAZUH_DEPLOYMENT_GRACE_SECONDS", "15")
+        )
+
+        # ── Télémétrie forensique Windows, Sysmon et Linux auditd ──
+        self.FORENSIC_TELEMETRY_ENABLED: bool = _env_bool(
+            "FORENSIC_TELEMETRY_ENABLED", False
+        )
+        self.FORENSIC_WINDOWS_EVENT_IDS: tuple[str, ...] = _env_csv(
+            "FORENSIC_WINDOWS_EVENT_IDS",
+            "4624,4663,4688,5145,1,3,11,22,23,26",
+        )
+        self.FORENSIC_AUDIT_KEYS: tuple[str, ...] = _env_csv(
+            "FORENSIC_AUDIT_KEYS", "audit-wazuh-c,janus-command"
+        )
+        self.FORENSIC_AGENT_IDS: tuple[str, ...] = _env_csv(
+            "FORENSIC_AGENT_IDS", ""
+        )
+        self.FORENSIC_LOGON_TYPES: tuple[str, ...] = _env_csv(
+            "FORENSIC_LOGON_TYPES", "2,3,8,9,10,11,12,13"
+        )
 
         # ── Derived / static paths ────────────────
         self.PROJECT_ROOT: str = PROJECT_ROOT
@@ -65,7 +168,12 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         """Create data directories at startup if they do not exist."""
-        for path in (self.DATA_DIR, self.DECOY_DROP_PATH, self.SAMPLES_DIR):
+        for path in (
+            self.DATA_DIR,
+            self.DECOY_DROP_PATH,
+            self.JANUS_DEPLOY_ROOT,
+            self.SAMPLES_DIR,
+        ):
             os.makedirs(path, exist_ok=True)
 
     @property
@@ -77,6 +185,29 @@ class Settings:
     def groq_configured(self) -> bool:
         """True when a Groq API key looks present (enables live generation)."""
         return self.GROQ_API_KEY.startswith("gsk_")
+
+    @property
+    def wazuh_indexer_configured(self) -> bool:
+        """True lorsque la collecte est activée avec des identifiants."""
+
+        return bool(
+            self.WAZUH_AUTO_COLLECT_ENABLED
+            and self.WAZUH_INDEXER_URL
+            and self.WAZUH_INDEXER_USERNAME
+            and self.WAZUH_INDEXER_PASSWORD
+        )
+
+    @property
+    def forensic_telemetry_configured(self) -> bool:
+        """True quand la collecte forensique peut joindre l'Indexer."""
+
+        return bool(
+            self.FORENSIC_TELEMETRY_ENABLED
+            and self.WAZUH_INDEXER_URL
+            and self.WAZUH_INDEXER_USERNAME
+            and self.WAZUH_INDEXER_PASSWORD
+            and (self.FORENSIC_WINDOWS_EVENT_IDS or self.FORENSIC_AUDIT_KEYS)
+        )
 
 
 @lru_cache()
