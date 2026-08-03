@@ -23,10 +23,13 @@ The SQLite database is created automatically on startup.
 """
 
 import base64
+import json
+import secrets
 import sys
 import threading
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from src.core.config import get_settings
@@ -50,6 +53,12 @@ from src.janus.document_assembler import assemble_document
 from src.janus.generators.accounting_workbook import (
     GENERATOR_VERSION as ACCOUNTING_GENERATOR_VERSION,
     build_accounting_workbook,
+)
+from src.janus.generators.structured_decoy import (
+    GENERATOR_VERSION as STRUCTURED_GENERATOR_VERSION,
+    SUPPORTED_FORMATS_BY_TYPE,
+    build_structured_decoy,
+    is_supported_combination,
 )
 from src.janus_v2.deployment.path_policy import (
     DeploymentPathError,
@@ -92,7 +101,33 @@ _forensic_thread: threading.Thread | None = None
 _forensic_stop_event = threading.Event()
 _forensic_start_error: str | None = None
 
-app = FastAPI(title="Honey-Documents Dynamiques", version="1.4.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _settings.ensure_dirs()
+    init_db()
+    _start_wazuh_collector()
+    _start_forensic_collector()
+    if not _settings.JANUS_ADMIN_API_KEY:
+        log.warning(
+            "JANUS_ADMIN_API_KEY is empty: administrative routes are local-only."
+        )
+    log.info("Alert server started. DB at %s", _settings.DB_PATH)
+    try:
+        yield
+    finally:
+        _wazuh_stop_event.set()
+        _forensic_stop_event.set()
+        if _wazuh_thread is not None and _wazuh_thread.is_alive():
+            _wazuh_thread.join(timeout=5)
+        if _forensic_thread is not None and _forensic_thread.is_alive():
+            _forensic_thread.join(timeout=5)
+
+
+app = FastAPI(
+    title="Honey-Documents Dynamiques",
+    version="2.0.0",
+    lifespan=_lifespan,
+)
 
 # 1x1 transparent PNG (returned by the fallback beacon).
 _PIXEL_PNG = base64.b64decode(
@@ -105,7 +140,55 @@ _CORPUS_BY_TYPE = {
     "financial_report": "corpus/financial",
     "hr_document": "corpus/hr",
     "technical_config": "corpus/technical",
+    "cloud_credentials": "corpus/technical",
 }
+
+
+def _is_local_request(request: Request) -> bool:
+    host = request.client.host.casefold() if request.client else ""
+    return host in {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def require_admin(request: Request) -> None:
+    """Protect administrative routes while keeping local development usable."""
+
+    expected = _settings.JANUS_ADMIN_API_KEY
+    if not expected:
+        if _settings.JANUS_ALLOW_UNAUTHENTICATED_LOCAL and _is_local_request(request):
+            return
+        raise HTTPException(
+            status_code=503,
+            detail="JANUS_ADMIN_API_KEY doit être configurée pour un accès distant.",
+        )
+
+    supplied = request.headers.get("x-janus-api-key", "")
+    authorization = request.headers.get("authorization", "")
+    if not supplied and authorization.casefold().startswith("bearer "):
+        supplied = authorization[7:].strip()
+    if not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Clé d'administration JANUS invalide ou absente.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def _detection_layers(req: GenerateRequest) -> list[str]:
+    """Return only detection mechanisms that the generated format can use."""
+
+    layers = ["wazuh_sacl"]
+    if req.output_format in {"docx", "xlsx"}:
+        layers.append("document_beacon")
+    else:
+        layers.append("url_breadcrumb")
+    if req.enable_ci3 and req.output_format == "docx":
+        layers.append("credential_honeypot")
+    if req.output_format in {"env", "yaml", "json", "zip"} and req.doc_type in {
+        "technical_config",
+        "cloud_credentials",
+    }:
+        layers.append("credential_honeypot")
+    return layers
 
 
 def _start_wazuh_collector() -> None:
@@ -266,37 +349,23 @@ def _forensic_status() -> dict:
     return status
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    _settings.ensure_dirs()
-    init_db()
-    _start_wazuh_collector()
-    _start_forensic_collector()
-    log.info("Alert server started. DB at %s", _settings.DB_PATH)
-
-
-@app.on_event("shutdown")
-def _shutdown() -> None:
-    _wazuh_stop_event.set()
-    _forensic_stop_event.set()
-    if _wazuh_thread is not None and _wazuh_thread.is_alive():
-        _wazuh_thread.join(timeout=5)
-    if _forensic_thread is not None and _forensic_thread.is_alive():
-        _forensic_thread.join(timeout=5)
-
-
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "honey-documents"}
+    return {
+        "status": "ok",
+        "service": "honey-documents",
+        "version": app.version,
+        "admin_auth_configured": bool(_settings.JANUS_ADMIN_API_KEY),
+    }
 
 
-@app.get("/canary/status")
+@app.get("/canary/status", dependencies=[Depends(require_admin)])
 def canary_status() -> dict:
     """Expose provider readiness without returning the configured email."""
     return get_canary_status()
 
 
-@app.post("/canary/test-token")
+@app.post("/canary/test-token", dependencies=[Depends(require_admin)])
 def create_canary_test_token(request: Request) -> dict:
     """Create, but never trigger, a web token for a controlled email test."""
     client_host = request.client.host if request.client else ""
@@ -325,7 +394,11 @@ def create_canary_test_token(request: Request) -> dict:
     }
 
 
-@app.post("/generate_decoy", response_model=GenerateResponse)
+@app.post(
+    "/generate_decoy",
+    response_model=GenerateResponse,
+    dependencies=[Depends(require_admin)],
+)
 def generate_decoy(req: GenerateRequest) -> GenerateResponse:
     """Run the full pipeline: token -> prompt -> LLM -> coherence -> assemble -> deploy."""
     try:
@@ -343,10 +416,14 @@ def generate_decoy(req: GenerateRequest) -> GenerateResponse:
         deployment_target,
     )
 
-    if req.output_format == "xlsx" and req.doc_type != "financial_report":
+    if not is_supported_combination(req.doc_type, req.output_format):
+        allowed = ", ".join(SUPPORTED_FORMATS_BY_TYPE.get(req.doc_type, ()))
         raise HTTPException(
             status_code=400,
-            detail="Le format xlsx est actuellement disponible pour financial_report.",
+            detail=(
+                f"Format {req.output_format} indisponible pour {req.doc_type}. "
+                f"Formats permis : {allowed}."
+            ),
         )
 
     scenario = req.scenario.strip() or (
@@ -384,7 +461,7 @@ def generate_decoy(req: GenerateRequest) -> GenerateResponse:
             fiscal_year=req.fiscal_year,
         )
         generator_version = ACCOUNTING_GENERATOR_VERSION
-    else:
+    elif req.output_format == "docx":
         doc = assemble_document(
             content=content,
             doc_type=req.doc_type,
@@ -394,6 +471,17 @@ def generate_decoy(req: GenerateRequest) -> GenerateResponse:
             enable_ci3=req.enable_ci3,
         )
         generator_version = "janus-docx/1.0"
+    else:
+        doc = build_structured_decoy(
+            doc_type=req.doc_type,
+            output_format=req.output_format,
+            summary_text=content,
+            token_id=token["token_id"],
+            token_url=token["token_url"],
+            company_name=req.company_name or "Atlas Conseil & Industrie SA",
+            fiscal_year=req.fiscal_year,
+        )
+        generator_version = STRUCTURED_GENERATOR_VERSION
 
     # 7) Deploy + persist
     deployment = deploy_document(
@@ -427,7 +515,7 @@ def generate_decoy(req: GenerateRequest) -> GenerateResponse:
         token_provider=token["provider"],
         token_type=token["token_type"],
         canary_webhook_enabled=_settings.CANARYTOKEN_WEBHOOK_ENABLED,
-        detection_layers=["wazuh_sacl", "document_beacon"],
+        detection_layers=_detection_layers(req),
     )
 
 
@@ -438,22 +526,16 @@ def generation_capabilities() -> dict:
     return {
         "formats": [
             {
-                "id": "docx",
+                "id": output_format,
                 "doc_types": [
-                    "financial_report",
-                    "hr_document",
-                    "technical_config",
+                    doc_type
+                    for doc_type, formats in SUPPORTED_FORMATS_BY_TYPE.items()
+                    if output_format in formats
                 ],
-                "scenarios": ["narrative"],
-                "canary_activation": "automatic_when_configured",
-            },
-            {
-                "id": "xlsx",
-                "doc_types": ["financial_report"],
-                "scenarios": ["financial_accounting"],
-                "canary_activation": "automatic_when_configured",
-                "token_type": "msexcel",
-            },
+                "automatic_callback_on_open": output_format in {"docx", "xlsx"},
+                "token_type": "msexcel" if output_format == "xlsx" else "web",
+            }
+            for output_format in ("docx", "xlsx", "csv", "json", "yaml", "env", "zip")
         ],
         "local_detection": "wazuh_sacl",
         "macros_required": False,
@@ -462,15 +544,23 @@ def generation_capabilities() -> dict:
 
 @app.post("/alert")
 async def receive_alert(request: Request) -> dict:
-    """Receive a Canarytoken (or decoy-infra) webhook and persist an alert."""
+    """Receive a known Canarytoken webhook and persist a bounded payload."""
+
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Callback trop volumineux.")
     try:
-        payload = await request.json()
-    except Exception:  # noqa: BLE001 — accept any body shape
-        payload = {}
+        payload = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise HTTPException(status_code=400, detail="Callback JSON invalide.") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Le callback doit être un objet JSON.")
 
     enriched = parse_callback(payload)
     token_row = get_token_by_id(enriched.get("token_id") or "")
-    honeydoc_id = token_row["honeydoc_id"] if token_row else None
+    if token_row is None:
+        raise HTTPException(status_code=404, detail="Token JANUS inconnu.")
+    honeydoc_id = token_row["honeydoc_id"]
 
     alert_id = insert_alert(
         token_id=enriched.get("token_id"),
@@ -493,12 +583,15 @@ async def receive_alert(request: Request) -> dict:
 @app.get("/ping/{token_id}")
 def ping_beacon(token_id: str, request: Request) -> Response:
     """Local fallback beacon: record the hit and return a 1x1 transparent PNG."""
+    token_row = get_token_by_id(token_id)
+    if token_row is None:
+        raise HTTPException(status_code=404, detail="Token JANUS inconnu.")
+
     src_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", "")
     enriched = parse_callback({"token_id": token_id, "src_ip": src_ip, "user_agent": user_agent})
 
-    token_row = get_token_by_id(token_id)
-    honeydoc_id = token_row["honeydoc_id"] if token_row else None
+    honeydoc_id = token_row["honeydoc_id"]
 
     insert_alert(
         token_id=token_id,
@@ -515,18 +608,25 @@ def ping_beacon(token_id: str, request: Request) -> Response:
         raw_payload=enriched.get("raw_payload"),
     )
     log.warning("PING beacon hit (token=%s ip=%s)", token_id, src_ip)
-    return Response(content=_PIXEL_PNG, media_type="image/png")
+    return Response(
+        content=_PIXEL_PNG,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/ci1/{token_id}")
 def ci1_callback(token_id: str, request: Request) -> dict:
     """CI1 callback: an automated LLM agent followed the hidden instruction."""
+    token_row = get_token_by_id(token_id)
+    if token_row is None:
+        raise HTTPException(status_code=404, detail="Token JANUS inconnu.")
+
     src_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", "")
     verdict = process_ci1_callback(token_id, src_ip, user_agent)
 
-    token_row = get_token_by_id(token_id)
-    honeydoc_id = token_row["honeydoc_id"] if token_row else None
+    honeydoc_id = token_row["honeydoc_id"]
 
     insert_alert(
         token_id=f"CI1_{token_id}",
@@ -543,26 +643,26 @@ def ci1_callback(token_id: str, request: Request) -> dict:
     return {"status": "verified", **verdict}
 
 
-@app.get("/alerts")
-def get_alerts(limit: int = 100) -> JSONResponse:
+@app.get("/alerts", dependencies=[Depends(require_admin)])
+def get_alerts(limit: int = Query(default=100, ge=1, le=500)) -> JSONResponse:
     return JSONResponse(content=list_alerts(limit=limit))
 
 
-@app.get("/honeydocs")
+@app.get("/honeydocs", dependencies=[Depends(require_admin)])
 def get_honeydocs() -> JSONResponse:
     return JSONResponse(content=list_honeydocs())
 
 
-@app.get("/wazuh/status")
+@app.get("/wazuh/status", dependencies=[Depends(require_admin)])
 def get_wazuh_status() -> JSONResponse:
     """Return collector health without exposing Indexer credentials."""
 
     return JSONResponse(content=_wazuh_status())
 
 
-@app.get("/wazuh/detections")
+@app.get("/wazuh/detections", dependencies=[Depends(require_admin)])
 def get_wazuh_detections(
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     matched_only: bool = False,
 ) -> JSONResponse:
     """List persisted Wazuh events and their JANUS verdicts."""
@@ -575,18 +675,18 @@ def get_wazuh_detections(
     )
 
 
-@app.get("/telemetry/status")
+@app.get("/telemetry/status", dependencies=[Depends(require_admin)])
 def get_telemetry_status() -> JSONResponse:
     """Expose l'état du collecteur sans révéler les identifiants Wazuh."""
 
     return JSONResponse(content=_forensic_status())
 
 
-@app.get("/telemetry/signals")
+@app.get("/telemetry/signals", dependencies=[Depends(require_admin)])
 def get_telemetry_signals(
-    limit: int = 100,
-    kind: str | None = None,
-    platform: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    kind: str | None = Query(default=None, max_length=64),
+    platform: str | None = Query(default=None, max_length=32),
 ) -> JSONResponse:
     """Liste les preuves normalisées; filtres facultatifs par type et OS."""
 
@@ -599,11 +699,11 @@ def get_telemetry_signals(
     )
 
 
-@app.get("/telemetry/timeline")
+@app.get("/telemetry/timeline", dependencies=[Depends(require_admin)])
 def get_telemetry_timeline(
-    logon_id: str,
-    hostname: str,
-    limit: int = 500,
+    logon_id: str = Query(min_length=1, max_length=128),
+    hostname: str = Query(min_length=1, max_length=255),
+    limit: int = Query(default=500, ge=1, le=2000),
 ) -> JSONResponse:
     """Reconstruit une session à partir d'un Logon ID Windows explicite."""
 

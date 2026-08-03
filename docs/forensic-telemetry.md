@@ -71,10 +71,11 @@ Windows d'un probleme de transport ou de regle Wazuh.
 ## Validation API
 
 ```powershell
-Invoke-RestMethod "http://127.0.0.1:8000/telemetry/status"
-Invoke-RestMethod "http://127.0.0.1:8000/telemetry/signals?limit=20"
-Invoke-RestMethod "http://127.0.0.1:8000/telemetry/signals?platform=linux&kind=command_execution"
-Invoke-RestMethod "http://127.0.0.1:8000/telemetry/timeline?hostname=DESKTOP-LAB&logon_id=0xabc"
+$headers = @{ "X-JANUS-API-Key" = $env:JANUS_ADMIN_API_KEY }
+Invoke-RestMethod "http://127.0.0.1:8000/telemetry/status" -Headers $headers
+Invoke-RestMethod "http://127.0.0.1:8000/telemetry/signals?limit=20" -Headers $headers
+Invoke-RestMethod "http://127.0.0.1:8000/telemetry/signals?platform=linux&kind=command_execution" -Headers $headers
+Invoke-RestMethod "http://127.0.0.1:8000/telemetry/timeline?hostname=DESKTOP-LAB&logon_id=0xabc" -Headers $headers
 ```
 
 La timeline n'associe les étapes que si **l'hôte et l'identifiant de session**

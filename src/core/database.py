@@ -32,11 +32,16 @@ _settings = get_settings()
 def get_conn() -> Iterator[sqlite3.Connection]:
     """Yield a SQLite connection with Row factory, committing on success."""
     _settings.ensure_dirs()
-    conn = sqlite3.connect(_settings.DB_PATH)
+    conn = sqlite3.connect(_settings.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -48,6 +53,8 @@ def _now() -> str:
 def init_db() -> None:
     """Create the application and Wazuh detection tables."""
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS honeydocs (
@@ -92,6 +99,13 @@ def init_db() -> None:
                 raw_payload   TEXT,
                 FOREIGN KEY (honeydoc_id) REFERENCES honeydocs (id)
             );
+
+            CREATE INDEX IF NOT EXISTS idx_honeydocs_active_filepath
+                ON honeydocs (active, filepath);
+            CREATE INDEX IF NOT EXISTS idx_tokens_token_id
+                ON tokens (token_id);
+            CREATE INDEX IF NOT EXISTS idx_alerts_triggered_at
+                ON alerts (triggered_at DESC);
             """
         )
 

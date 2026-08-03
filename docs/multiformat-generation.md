@@ -6,12 +6,21 @@
 |---|---|---|---|
 | DOCX | finance, RH, technique | narration IA + couches JANUS | Wazuh + beacon document si configuré |
 | XLSX | comptabilité financière | synthèse IA + écritures calculées | Wazuh + beacon Excel |
+| CSV | finance, RH | tableaux structurés | Wazuh + URL breadcrumb |
+| JSON | finance, RH, technique, cloud | données structurées | Wazuh + URL breadcrumb |
+| YAML | technique, cloud | configuration synthétique | Wazuh + faux endpoint HTTP |
+| ENV | technique, cloud | credentials entièrement factices | Wazuh + faux endpoint HTTP |
+| ZIP | technique, cloud | bundle ENV/YAML/manifest | Wazuh + faux endpoint après extraction |
 
 Le classeur XLSX ne contient aucune macro. Il contient une image transparente
 dont la relation OOXML cible l'URL unique du token `msexcel`. Microsoft Excel
 contacte cette ressource à l'ouverture, ce qui déclenche la notification
 Canarytokens. Si le fournisseur est indisponible, la même relation pointe vers
 le beacon local JANUS.
+
+Les formats texte et ZIP ne déclenchent pas automatiquement une requête réseau
+à leur simple ouverture. Ils contiennent un breadcrumb URL et des identifiants
+fictifs associés au token. Wazuh/SACL reste donc leur couche principale.
 
 ## Responsabilités du pipeline
 

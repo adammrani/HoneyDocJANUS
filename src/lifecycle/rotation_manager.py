@@ -39,30 +39,53 @@ def check_and_rotate(api_url: str = "") -> dict:
     docs = list_active_honeydocs()
     rotated = 0
     regenerated = 0
+    failed = 0
 
     for doc in docs:
         age = _age_hours(doc.get("created_at", ""))
         if age >= float(doc.get("ttl_hours", 72)):
-            deactivate_honeydoc(doc["id"])
-            rotated += 1
-            log.info("HoneyDoc #%s expired (age=%.1fh) — deactivated", doc["id"], age)
-
             try:
+                headers = (
+                    {"X-JANUS-API-Key": _settings.JANUS_ADMIN_API_KEY}
+                    if _settings.JANUS_ADMIN_API_KEY
+                    else {}
+                )
                 resp = requests.post(
                     f"{api_url}/generate_decoy",
                     json={
                         "doc_type": doc.get("doc_type", "financial_report"),
+                        "output_format": doc.get("file_format", "docx"),
+                        "scenario": doc.get("scenario", ""),
                         "target_dir": doc.get("target_dir", ""),
                         "ttl_hours": int(doc.get("ttl_hours", 72)),
                     },
-                    timeout=30,
+                    headers=headers,
+                    timeout=90,
                 )
                 if resp.ok:
+                    deactivate_honeydoc(doc["id"])
+                    rotated += 1
                     regenerated += 1
+                    log.info(
+                        "HoneyDoc #%s rotated after %.1fh.", doc["id"], age
+                    )
+                else:
+                    failed += 1
+                    log.warning(
+                        "Regeneration rejected for #%s: HTTP %s",
+                        doc["id"],
+                        resp.status_code,
+                    )
             except requests.RequestException as exc:
+                failed += 1
                 log.warning("Regeneration request failed for #%s: %s", doc["id"], exc)
 
-    summary = {"checked": len(docs), "rotated": rotated, "regenerated": regenerated}
+    summary = {
+        "checked": len(docs),
+        "rotated": rotated,
+        "regenerated": regenerated,
+        "failed": failed,
+    }
     log.info("Rotation summary: %s", summary)
     return summary
 

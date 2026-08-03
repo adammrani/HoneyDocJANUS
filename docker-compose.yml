@@ -1,17 +1,27 @@
 services:
   api:
     build: .
-    command: python src/main.py
+    command: python main.py
     ports:
       - "8000:8000"   # FastAPI
       - "2222:2222"   # decoy SSH
       - "8080:8080"   # decoy HTTP
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      - API_HOST=0.0.0.0
+      - DECOY_BIND_HOST=0.0.0.0
     volumes:
       - ./data:/app/data
       - ./config:/app/config
       - ./corpus:/app/corpus
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   dashboard:
@@ -20,7 +30,8 @@ services:
     ports:
       - "8501:8501"   # Streamlit
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - CALLBACK_BASE_URL=http://api:8000
     volumes:
@@ -28,5 +39,6 @@ services:
       - ./config:/app/config
       - ./corpus:/app/corpus
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped

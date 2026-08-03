@@ -8,7 +8,6 @@ the decoy document and tries to use the credentials, they hit our honeypot and
 reveal themselves. The API key embeds the token_id for traceability.
 """
 
-import random
 from urllib.parse import urlparse
 
 from src.core.config import get_settings
@@ -20,6 +19,10 @@ def _decoy_host() -> str:
     """Extract the host part of CALLBACK_BASE_URL (attacker-facing bait host)."""
     parsed = urlparse(_settings.CALLBACK_BASE_URL)
     return parsed.hostname or "localhost"
+
+
+def _decoy_api_url(token_id: str) -> str:
+    return f"http://{_decoy_host()}:{_settings.DECOY_HTTP_PORT}/api/login/{token_id}"
 
 
 def generate_credentials(doc_type: str, token_id: str) -> dict:
@@ -35,7 +38,7 @@ def generate_credentials(doc_type: str, token_id: str) -> dict:
     if doc_type == "financial_report":
         return {
             "Système": "ERP SAP — Module Finance (FI/CO)",
-            "URL": f"http://{host}:8080/api/login",
+            "URL": _decoy_api_url(token_id),
             "Client SAP": "300",
             "Utilisateur": "svc_finance_ro",
             "Mot de passe": f"Fin${short}!",
@@ -45,7 +48,7 @@ def generate_credentials(doc_type: str, token_id: str) -> dict:
     if doc_type == "hr_document":
         return {
             "Système": "Portail RH interne",
-            "URL": f"http://{host}:8080/api/login",
+            "URL": _decoy_api_url(token_id),
             "Utilisateur": "hr.reporting",
             "Mot de passe": f"Rh#{short}2026",
             "Clé API": f"hrportal-{token_id}",
@@ -57,9 +60,7 @@ def generate_credentials(doc_type: str, token_id: str) -> dict:
         "SSH": f"ssh svc_deploy@{host} -p 2222",
         "Mot de passe SSH": f"Dpl0y-{short}",
         "Clé API": f"apikey-{token_id}",
-        "Chaîne de connexion DB": (
-            f"postgresql://svc_app:Db{random.randint(1000,9999)}@{host}:8080/prod"
-        ),
+        "API de sauvegarde": _decoy_api_url(token_id),
     }
 
 

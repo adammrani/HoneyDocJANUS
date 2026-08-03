@@ -43,6 +43,32 @@ def _env_csv(name: str, default: str) -> tuple[str, ...]:
     )
 
 
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} doit être un entier, reçu : {raw!r}.") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} doit être compris entre {minimum} et {maximum}, reçu : {value}."
+        )
+    return value
+
+
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise ValueError(f"{name} doit être un nombre, reçu : {raw!r}.") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} doit être compris entre {minimum} et {maximum}, reçu : {value}."
+        )
+    return value
+
+
 class Settings:
     """Runtime configuration, populated from environment variables."""
 
@@ -64,8 +90,8 @@ class Settings:
         self.CANARYTOKEN_EMAIL: str = os.getenv(
             "CANARYTOKEN_EMAIL", "alerts@example.com"
         )
-        self.CANARYTOKEN_TIMEOUT_SECONDS: float = float(
-            os.getenv("CANARYTOKEN_TIMEOUT_SECONDS", "10")
+        self.CANARYTOKEN_TIMEOUT_SECONDS: float = _env_float(
+            "CANARYTOKEN_TIMEOUT_SECONDS", 10, 0.1, 300
         )
         self.CANARYTOKEN_WEBHOOK_ENABLED: bool = _env_bool(
             "CANARYTOKEN_WEBHOOK_ENABLED",
@@ -76,8 +102,21 @@ class Settings:
         self.CALLBACK_BASE_URL: str = os.getenv(
             "CALLBACK_BASE_URL", "http://localhost:8000"
         ).rstrip("/")
-        self.API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-        self.API_PORT: int = int(os.getenv("API_PORT", "8000"))
+        self.API_HOST: str = os.getenv("API_HOST", "127.0.0.1")
+        self.API_PORT: int = _env_int("API_PORT", 8000, 1, 65535)
+        self.JANUS_ADMIN_API_KEY: str = os.getenv(
+            "JANUS_ADMIN_API_KEY", ""
+        ).strip()
+        self.JANUS_ALLOW_UNAUTHENTICATED_LOCAL: bool = _env_bool(
+            "JANUS_ALLOW_UNAUTHENTICATED_LOCAL", True
+        )
+        self.ROTATION_INTERVAL_MINUTES: int = _env_int(
+            "ROTATION_INTERVAL_MINUTES", 30, 1, 10080
+        )
+        self.DECOY_INFRA_ENABLED: bool = _env_bool("DECOY_INFRA_ENABLED", True)
+        self.DECOY_BIND_HOST: str = os.getenv("DECOY_BIND_HOST", "127.0.0.1")
+        self.DECOY_HTTP_PORT: int = _env_int("DECOY_HTTP_PORT", 8080, 1, 65535)
+        self.DECOY_SSH_PORT: int = _env_int("DECOY_SSH_PORT", 2222, 1, 65535)
 
         # ── Storage (always resolved to absolute paths) ──
         self.DB_PATH: str = _abs(os.getenv("DB_PATH", "data/honeydocs.db"))
@@ -118,26 +157,26 @@ class Settings:
         self.WAZUH_CA_CERT_PATH: str = (
             _abs(wazuh_ca_cert) if wazuh_ca_cert else ""
         )
-        self.WAZUH_POLL_INTERVAL_SECONDS: float = float(
-            os.getenv("WAZUH_POLL_INTERVAL_SECONDS", "5")
+        self.WAZUH_POLL_INTERVAL_SECONDS: float = _env_float(
+            "WAZUH_POLL_INTERVAL_SECONDS", 5, 0.1, 3600
         )
-        self.WAZUH_INITIAL_LOOKBACK_MINUTES: int = int(
-            os.getenv("WAZUH_INITIAL_LOOKBACK_MINUTES", "15")
+        self.WAZUH_INITIAL_LOOKBACK_MINUTES: int = _env_int(
+            "WAZUH_INITIAL_LOOKBACK_MINUTES", 15, 0, 10080
         )
-        self.WAZUH_OVERLAP_SECONDS: int = int(
-            os.getenv("WAZUH_OVERLAP_SECONDS", "120")
+        self.WAZUH_OVERLAP_SECONDS: int = _env_int(
+            "WAZUH_OVERLAP_SECONDS", 120, 0, 3600
         )
-        self.WAZUH_EVENT_SETTLE_SECONDS: int = int(
-            os.getenv("WAZUH_EVENT_SETTLE_SECONDS", "3")
+        self.WAZUH_EVENT_SETTLE_SECONDS: int = _env_int(
+            "WAZUH_EVENT_SETTLE_SECONDS", 3, 0, 300
         )
-        self.WAZUH_BATCH_SIZE: int = int(
-            os.getenv("WAZUH_BATCH_SIZE", "200")
+        self.WAZUH_BATCH_SIZE: int = _env_int(
+            "WAZUH_BATCH_SIZE", 200, 1, 10000
         )
-        self.WAZUH_REQUEST_TIMEOUT_SECONDS: float = float(
-            os.getenv("WAZUH_REQUEST_TIMEOUT_SECONDS", "10")
+        self.WAZUH_REQUEST_TIMEOUT_SECONDS: float = _env_float(
+            "WAZUH_REQUEST_TIMEOUT_SECONDS", 10, 0.1, 300
         )
-        self.WAZUH_DEPLOYMENT_GRACE_SECONDS: float = float(
-            os.getenv("WAZUH_DEPLOYMENT_GRACE_SECONDS", "15")
+        self.WAZUH_DEPLOYMENT_GRACE_SECONDS: float = _env_float(
+            "WAZUH_DEPLOYMENT_GRACE_SECONDS", 15, 0, 3600
         )
 
         # ── Télémétrie forensique Windows, Sysmon et Linux auditd ──

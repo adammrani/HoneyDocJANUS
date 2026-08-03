@@ -92,12 +92,14 @@ class SignalAdapterTests(unittest.TestCase):
             ("0x2", "%%4417", ObservedAction.MODIFY),
             ("0x10000", "%%1537", ObservedAction.DELETE),
         ]
+        parsed = []
         for mask, access, expected in cases:
             signal = parse_wazuh_signal(
                 windows_alert("4663", {**common, "accessMask": mask, "accessList": access})
             )
+            parsed.append(signal)
             self.assertEqual(signal.action, expected)
-        self.assertIn("office_open_candidate", signal.tags if expected == ObservedAction.DELETE else ())
+        self.assertIn("office_open_candidate", parsed[0].tags)
 
     def test_4624_preserves_entry_point_and_localhost(self):
         signal = parse_wazuh_signal(

@@ -13,7 +13,7 @@ _settings = get_settings()
 
 _MIN_CHARS = 200
 
-_FALLBACK_CONTENT = (
+_FINANCIAL_FALLBACK = (
     "RAPPORT INTERNE — SYNTHÈSE DE GESTION\n\n"
     "Le présent document dresse une synthèse de l'activité de la période écoulée "
     "à destination du comité de direction. Les indicateurs opérationnels restent "
@@ -32,10 +32,42 @@ _FALLBACK_CONTENT = (
     "éléments d'ici la fin de semaine."
 )
 
+_HR_FALLBACK = (
+    "REVUE INTERNE DES EFFECTIFS — SYNTHÈSE\n\n"
+    "La campagne d'évaluation du second semestre couvre les équipes Finance, "
+    "Opérations, Informatique et Ressources humaines. Les entretiens doivent être "
+    "finalisés avant le 30 septembre et validés par chaque responsable de département.\n\n"
+    "Les priorités portent sur la continuité des fonctions critiques, la mobilité "
+    "interne et l'identification des besoins de formation. Les données salariales "
+    "restent limitées aux responsables habilités. Toute extraction doit être tracée "
+    "et conservée dans l'espace RH restreint.\n\n"
+    "Les écarts de classification seront examinés lors du comité mensuel. Ce document "
+    "est confidentiel et ne doit pas être transmis hors de l'organisation."
+)
 
-def _fallback(reason: str) -> str:
+_TECHNICAL_FALLBACK = (
+    "NOTE D'EXPLOITATION — REPRISE DES SERVICES\n\n"
+    "Le plan de reprise prévoit une restauration contrôlée des services applicatifs, "
+    "puis une validation des flux réseau et des comptes techniques en lecture seule. "
+    "Les changements sont exécutés depuis le bastion d'administration et consignés "
+    "dans le journal de maintenance.\n\n"
+    "Avant toute opération, vérifier l'intégrité de l'archive, la date du manifeste "
+    "et la disponibilité du point de contrôle interne. Les identifiants associés à "
+    "cette procédure sont réservés au laboratoire de reprise et ne donnent accès à "
+    "aucune ressource de production réelle.\n\n"
+    "Après validation, effectuer un test applicatif non destructif et transmettre le "
+    "compte rendu à l'équipe infrastructure. Diffusion strictement restreinte."
+)
+
+
+def _fallback(reason: str, prompt: str = "") -> str:
     log.warning("LLM fallback used: %s", reason)
-    return _FALLBACK_CONTENT
+    normalized = prompt.casefold()
+    if "ressources humaines" in normalized or "document rh" in normalized:
+        return _HR_FALLBACK
+    if any(word in normalized for word in ("cloud", "devops", "système", "configuration")):
+        return _TECHNICAL_FALLBACK
+    return _FINANCIAL_FALLBACK
 
 
 def generate_content(prompt: str, max_retries: int = 3) -> str:
@@ -46,17 +78,17 @@ def generate_content(prompt: str, max_retries: int = 3) -> str:
     a generic French document if Groq is unconfigured or unreachable.
     """
     if not _settings.groq_configured:
-        return _fallback("GROQ_API_KEY not configured")
+        return _fallback("GROQ_API_KEY not configured", prompt)
 
     try:
         from groq import Groq  # lazy import so the module loads without the dep
     except ImportError:
-        return _fallback("groq package not installed")
+        return _fallback("groq package not installed", prompt)
 
     try:
         client = Groq(api_key=_settings.GROQ_API_KEY)
     except Exception as exc:  # noqa: BLE001
-        return _fallback(f"Groq client init failed: {exc}")
+        return _fallback(f"Groq client init failed: {exc}", prompt)
 
     last_content = ""
     for attempt in range(1, max_retries + 1):
@@ -78,4 +110,4 @@ def generate_content(prompt: str, max_retries: int = 3) -> str:
 
     if len(last_content) >= _MIN_CHARS:
         return last_content
-    return _fallback("all retries produced insufficient content")
+    return _fallback("all retries produced insufficient content", prompt)

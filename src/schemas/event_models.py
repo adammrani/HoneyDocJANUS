@@ -12,13 +12,26 @@ from pydantic import BaseModel, Field
 class GenerateRequest(BaseModel):
     """Body of POST /generate_decoy."""
 
-    doc_type: str = Field(..., description="financial_report | hr_document | technical_config")
-    target_dir: str = ""
-    ttl_hours: int = 72
+    doc_type: Literal[
+        "financial_report",
+        "hr_document",
+        "technical_config",
+        "cloud_credentials",
+    ] = Field(..., description="Catégorie métier du leurre")
+    target_dir: str = Field(default="", max_length=1024)
+    ttl_hours: int = Field(default=72, ge=1, le=8760)
     enable_janus: bool = True
     enable_ci3: bool = True
-    output_format: Literal["docx", "xlsx"] = "docx"
-    scenario: str = ""
+    output_format: Literal[
+        "docx",
+        "xlsx",
+        "csv",
+        "json",
+        "yaml",
+        "env",
+        "zip",
+    ] = "docx"
+    scenario: str = Field(default="", max_length=120)
     company_name: Optional[str] = Field(default=None, max_length=120)
     fiscal_year: int = Field(
         default_factory=lambda: datetime.now().year,

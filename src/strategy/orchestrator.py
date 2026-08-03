@@ -22,6 +22,8 @@ _TYPE_KEYWORDS = {
                           "tresorerie", "bilan", "reporting"],
     "hr_document": ["hr", "rh", "contract", "contrat", "onboarding", "employe",
                     "recrutement"],
+    "cloud_credentials": ["aws", "azure", "gcp", "cloud", "access_key",
+                          "iam", "s3", "service_account", "recovery"],
     "technical_config": ["config", "credential", "api_key", "backup", "deploy",
                          "secret", ".yaml", ".env", ".sql"],
 }

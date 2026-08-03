@@ -94,9 +94,12 @@ avec `WAZUH_CA_CERT_PATH`.
 
 Après redémarrage de l'API :
 
-```text
-GET /wazuh/status
-GET /wazuh/detections?limit=100&matched_only=true
+```powershell
+$headers = @{ "X-JANUS-API-Key" = $env:JANUS_ADMIN_API_KEY }
+Invoke-RestMethod "http://127.0.0.1:8000/wazuh/status" -Headers $headers
+Invoke-RestMethod `
+  "http://127.0.0.1:8000/wazuh/detections?limit=100&matched_only=true" `
+  -Headers $headers
 ```
 
 Une panne de l'Indexer ne bloque pas l'API : le collecteur réessaie après son

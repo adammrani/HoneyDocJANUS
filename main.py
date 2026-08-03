@@ -1,13 +1,11 @@
-"""
-src/main.py
-Application entrypoint.
+"""Application entrypoint for the standalone JANUS service.
 
 Starts:
   - the decoy infrastructure (fake SSH :2222 + fake HTTP :8080) in background,
   - the TTL rotation loop in a background thread,
   - the FastAPI server (uvicorn) on API_HOST:API_PORT.
 
-Run:  python src/main.py
+Run:  python main.py
 """
 
 import threading
@@ -23,18 +21,28 @@ _settings = get_settings()
 
 def _start_background_services() -> None:
     """Launch decoy infra and rotation loop as daemon threads."""
-    try:
-        from src.detection.decoy_infra import start_decoy_infra
+    if _settings.DECOY_INFRA_ENABLED:
+        try:
+            from src.detection.decoy_infra import start_decoy_infra
 
-        start_decoy_infra(http_port=8080, ssh_port=2222)
-    except Exception as exc:  # noqa: BLE001 — never block API startup
-        log.warning("Could not start decoy infrastructure: %s", exc)
+            start_decoy_infra(
+                http_port=_settings.DECOY_HTTP_PORT,
+                ssh_port=_settings.DECOY_SSH_PORT,
+                bind_host=_settings.DECOY_BIND_HOST,
+            )
+        except Exception as exc:  # noqa: BLE001 — never block API startup
+            log.warning("Could not start decoy infrastructure: %s", exc)
+    else:
+        log.info("Decoy infrastructure is disabled.")
 
     try:
         from src.lifecycle.rotation_manager import run_loop
 
         threading.Thread(
-            target=run_loop, kwargs={"interval_minutes": 30}, daemon=True
+            target=run_loop,
+            kwargs={"interval_minutes": _settings.ROTATION_INTERVAL_MINUTES},
+            name="janus-rotation-manager",
+            daemon=True,
         ).start()
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not start rotation loop: %s", exc)
