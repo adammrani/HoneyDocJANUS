@@ -1,0 +1,148 @@
+\chapter{State of the Art and Technical Foundations}
+
+\section{Introduction}
+
+JANUS combines technologies that are often deployed independently. Honeytokens
+provide low-noise tripwires, host auditing records local activity, a SIEM/HIDS
+normalizes evidence, and generative AI varies the decoy content. This chapter
+explains the role and limits of each component.
+
+\section{Cyber deception and honey documents}
+
+Cyber deception deliberately exposes false information or services in order to
+influence an adversary and improve defender observation. In contrast with a
+production resource, a properly isolated decoy should have no routine use. This
+raises the investigative value of an interaction, but it does not automatically
+make every event malicious: antivirus, indexing software, backup agents, and
+authorized tests can also touch a file. A mature design therefore records
+context and supports suppression rather than assuming intent from one event.
+
+A honey document is a decoy file with a plausible business purpose and one or
+more observation mechanisms. Its realism depends on its filename, internal
+structure, metadata, placement, and consistency with neighboring files. Its
+safety depends on the absence of real secrets and dangerous active content.
+
+\section{Honeytokens and remote callbacks}
+
+Canarytokens implement lightweight tripwires that notify a defender when a
+unique token is used. The official getting-started guide describes the basic
+model as create, place, and wait for an alert \cite{canaryGettingStarted}.
+Activation is token-specific.
+
+\subsection{Office tokens}
+
+Microsoft Word and Excel tokens can alert when opened in their native
+applications \cite{canaryOffice}. Non-macro variants rely on a network lookup
+for embedded external content. This is preferable for JANUS because it avoids
+asking users to enable macros. It is nevertheless conditional: protected view,
+external-content policy, offline operation, or network filtering can prevent
+the request.
+
+\subsection{Web breadcrumbs}
+
+A URL embedded in CSV, JSON, YAML, ENV, or ZIP content is passive. Opening the
+file in a text editor does not execute a network request. The alert occurs only
+if a person or tool uses the URL. JANUS therefore labels this mode as
+user-action-required instead of automatic.
+
+\subsection{AWS key tokens}
+
+An AWS API Keys Canarytoken is a decoy access-key pair. Thinkst documents that
+an alert is generated when the keys are used through the AWS API and notes a
+possible delay of 2 to 30 minutes through AWS logging infrastructure
+\cite{canaryAws}. Merely displaying an ENV file must not be reported as a
+remote token activation.
+
+\section{Windows SACL and event 4663}
+
+A System Access Control List specifies which access attempts on a securable
+object must be audited. It is distinct from a discretionary ACL: the SACL does
+not grant access; it requests audit records when selected rights are exercised.
+
+Windows Security event 4663 states that an operation was performed on an
+object. Microsoft explains that it is generated only when the object's SACL
+contains the required audit entry and that, unlike event 4656, it represents a
+right that was used rather than merely requested \cite{microsoft4663}. Useful
+fields include:
+
+\begin{itemize}
+  \item \texttt{ObjectName}: the accessed file or directory;
+  \item \texttt{ProcessName} and \texttt{ProcessId}: the local process;
+  \item \texttt{SubjectUserName}, domain, SID, and logon ID: the security
+  context;
+  \item \texttt{AccessMask} and \texttt{AccessList}: the exercised rights;
+  \item timestamp, computer name, and event record identifier.
+\end{itemize}
+
+Event 4663 is strong evidence that a right was exercised on the monitored host,
+but it is not a semantic record of user intention. A read can result from Word,
+PowerShell, an antivirus engine, an indexer, or a copy utility. A remote
+download requires corroborating SMB, authentication, process, or network
+events.
+
+\section{Wazuh file and event monitoring}
+
+Wazuh provides agent-based collection, rules, indexing, and visualization.
+Its File Integrity Monitoring module tracks file creation, modification, and
+deletion by comparing checksums and attributes \cite{wazuhFim}. In who-data
+mode on Windows, Wazuh uses the Microsoft audit subsystem and can configure the
+required audit policy and SACL \cite{wazuhWhodata}. JANUS additionally consumes
+the Security event channel and applies dedicated rules to audited access under
+the project deployment root.
+
+For Linux, the kernel audit system can monitor read, write, execute, and
+attribute access using keyed audit rules; Wazuh provides a documented path for
+collecting and visualizing these events \cite{wazuhAuditd}. JANUS includes an
+adapter for Linux audit signals, but the validated demonstration environment is
+Windows.
+
+\section{Generative AI for deception content}
+
+An LLM can produce varied business narratives and reduce the repetitive nature
+of static templates. It should not directly control deployment, token creation,
+or filesystem paths. JANUS therefore uses the model for constrained text only.
+Deterministic code selects the format, creates the token, assembles the file,
+validates its structure, chooses the destination, and records evidence. A local
+fallback keeps the project testable when a remote model is not configured.
+
+The main risks are leakage of secrets in prompts, uncontrolled model output,
+hallucinated operational claims, prompt injection embedded in source material,
+and non-reproducible content. The implementation addresses these risks through
+prompt minimization, a controlled corpus, coherence checks, forbidden-pattern
+scanning, and post-generation artifact validation.
+
+\section{Comparative analysis}
+
+\begin{table}[H]
+\centering
+\caption{Comparison of observation mechanisms used by JANUS}
+\label{tab:mechanism-comparison}
+\small
+\begin{tabular}{p{0.19\linewidth}p{0.24\linewidth}p{0.24\linewidth}p{0.24\linewidth}}
+\toprule
+Mechanism & Direct evidence & Main value & Main limitation \\
+\midrule
+Windows 4663 & Account, process, object, access right, time & Local interaction context & Only on an audited host; read semantics are limited \\
+Wazuh & Normalized alert, rule, agent, indexed evidence & Collection and correlation & Depends on agent, rules, and indexer availability \\
+Office token & Remote HTTP/DNS activation and request metadata & Detection after the file leaves the host & Can be blocked by Office or network policy \\
+AWS keys token & Use of a decoy key against AWS APIs & High-value credential-use signal & Opening the file does not activate it; alert may be delayed \\
+Web breadcrumb & Request to a unique URL & Simple cross-platform tripwire & Requires a deliberate click or tool action \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Positioning of JANUS}
+
+JANUS is not a replacement for Wazuh or Canarytokens. Its contribution is the
+orchestration layer between them: it generates and registers each decoy,
+selects the appropriate token, controls deployment, correlates endpoint events
+with the active registry, and explains sensor limits in one interface. The
+design is intentionally low interaction and defensive.
+
+\section{Conclusion}
+
+No single sensor provides every desired attacker attribute. The architecture
+must combine endpoint evidence and remote tripwires while preserving the
+different confidence levels of each source. Chapter 3 turns these principles
+into system requirements and components.
+

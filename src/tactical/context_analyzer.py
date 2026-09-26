@@ -74,21 +74,15 @@ def build_prompt(doc_type: str, target_dir: str = "") -> str:
             f"{joined}\n\n"
         )
 
-    context_hint = ""
-    if target_dir:
-        context_hint = (
-            f"Le document sera déposé dans le répertoire « {target_dir} ». "
-            "Choisis un sujet crédible pour cet emplacement.\n"
-        )
-
     prompt = (
         f"{persona}\n\n"
         f"{corpus_block}"
-        f"{context_hint}"
         "Rédige un document interne d'entreprise réaliste et crédible, "
         "entièrement en français, d'une longueur de 300 à 500 mots. "
         "Le document doit paraître authentique et confidentiel : titres de sections, "
         "chiffres plausibles, références internes, ton professionnel sobre. "
+        "Ne mentionne aucun chemin local, outil de sécurité, mécanisme de "
+        "détection, leurre ou procédé de génération. "
         "N'ajoute aucun commentaire, aucune explication, aucune note : "
         "produis uniquement le contenu du document."
     )

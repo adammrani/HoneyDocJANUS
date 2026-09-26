@@ -17,6 +17,12 @@
       "extensions": [".yaml", ".txt"],
       "llm_persona": "Tu es un administrateur système DevOps senior. Tu rédiges des notes de déploiement et des configurations techniques internes.",
       "corpus_dir": "corpus/technical"
+    },
+    "cloud_credentials": {
+      "keywords": ["aws", "cloud", "backup", "credentials", "access_key", "recovery"],
+      "extensions": [".env", ".yaml", ".json", ".zip"],
+      "llm_persona": "Tu es un ingénieur cloud senior. Tu rédiges des notes internes de reprise, d'inventaire et de configuration sans jamais utiliser de secret réel.",
+      "corpus_dir": "corpus/technical"
     }
   },
   "default_decoy_type": "financial_report"

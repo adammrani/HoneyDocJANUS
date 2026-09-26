@@ -1,0 +1,188 @@
+\documentclass{rapportENSIAS}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{csquotes}
+
+\definecolor{codebg}{rgb}{0.96,0.96,0.96}
+\definecolor{janusblue}{RGB}{30,79,125}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  showstringspaces=false
+}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=janusblue,
+  citecolor=janusblue,
+  urlcolor=janusblue,
+  pdftitle={JANUS: AI-Assisted Honey Documents for Deception and Attacker Interaction Detection}
+}
+\graphicspath{{figures/}{figures/evidence/}}
+
+\newcommand{\plannedfigure}[3]{
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{#1}{
+      \includegraphics[width=0.94\linewidth]{#1}
+    }{
+      \fbox{\parbox[c][5.0cm][c]{0.88\linewidth}{\centering
+        Figure to be exported from Mermaid source:\\[0.4em]
+        \texttt{#1}}}
+    }
+    \caption{#2}
+    \label{#3}
+  \end{figure}
+}
+
+\title{JANUS Final Year Project Report}
+
+\begin{document}
+
+\titre{JANUS: AI-Assisted Honey Documents for Deception and Attacker Interaction Detection}
+\sujet{Final Year Project}
+\UE{Cybersecurity, Cloud and Mobile Computing}
+\enseignant{[Supervisor name]}
+\eleves{[Student name(s)]}
+\jury{[Jury members]}
+\annee{2025-2026}
+
+\fairemarges
+\fairepagedegarde
+
+\pagenumbering{roman}
+
+\chapter*{Acknowledgements}
+\addcontentsline{toc}{chapter}{Acknowledgements}
+This section will be completed by the student. It should thank the project
+supervisor, the jury, the ENSIAS teaching staff, and the people who directly
+supported the work, without using generic or invented names.
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+JANUS is a defensive cyber-deception prototype that generates realistic
+honey documents with artificial intelligence, deploys them in a monitored
+directory, and correlates local endpoint evidence with remote Canarytokens
+signals. The project addresses a practical limitation of static honey files:
+their content rapidly becomes repetitive, while a single remote callback does
+not explain what happened on the monitored host. JANUS therefore combines a
+controlled generation pipeline, artifact safety gates, Windows System Access
+Control List auditing, Wazuh rules and collection, official Canarytokens, an
+SQLite evidence registry, and a Streamlit dashboard. The implemented formats
+include DOCX, XLSX, CSV, JSON, YAML, ENV, and ZIP. Tests performed on Windows
+show that a file read can be traced to Security event 4663 and a dedicated
+Wazuh rule while preserving the original evidence. Office and AWS tokens add a
+remote signal when their format-specific activation condition is met. The
+prototype deliberately avoids claims that cannot be supported: an Internet
+callback normally exposes an egress IP rather than a device identity, a MAC
+address is unavailable across routed networks, and one read event alone does
+not prove a remote download. The result is a reproducible academic MVP that
+demonstrates defense-in-depth for honey documents and documents its operational
+and forensic limits.
+
+\vspace{0.5em}
+\noindent\textbf{Keywords:} cyber deception, honey document, honeytoken,
+Wazuh, Canarytokens, Windows auditing, generative AI, digital evidence.
+
+\chapter*{List of Abbreviations}
+\addcontentsline{toc}{chapter}{List of Abbreviations}
+\begin{longtable}{>{\bfseries}p{0.18\linewidth}p{0.72\linewidth}}
+API & Application Programming Interface \\
+AWS & Amazon Web Services \\
+FIM & File Integrity Monitoring \\
+HIDS & Host-based Intrusion Detection System \\
+LLM & Large Language Model \\
+MVP & Minimum Viable Product \\
+OOXML & Office Open XML \\
+SACL & System Access Control List \\
+SIEM & Security Information and Event Management \\
+SOC & Security Operations Center \\
+TTP & Tactic, Technique, and Procedure \\
+TTL & Time To Live \\
+\end{longtable}
+
+\clearpage
+\tabledematieres
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+
+\pagenumbering{arabic}
+\chapter*{General Introduction}
+\addcontentsline{toc}{chapter}{General Introduction}
+Organizations protect sensitive documents with access controls, endpoint
+monitoring, and data-loss prevention. These mechanisms remain necessary, but
+they mostly react to access involving known assets. A well-placed decoy creates
+a different signal: because the file has no legitimate operational purpose,
+an interaction with it has a high investigative value. The challenge is not
+only to create an attractive filename. A useful honey document must remain
+credible, must not leak real secrets, must be deployable at scale, and must
+produce evidence that an analyst can interpret without overclaiming.
+
+JANUS explores this problem through two complementary observation layers. The
+first is local: Windows auditing and Wazuh record the account, process, object
+path, access mask, and event time on a monitored endpoint. The second is
+remote: a Canarytoken can notify the defender when Office loads external
+content or when decoy cloud credentials are presented to the AWS API. An
+AI-assisted generation stage provides varied business content, while safety
+checks and format-specific assemblers keep the artifacts controlled.
+
+This report presents the problem, related technologies, requirements,
+architecture, implementation, validation, and limitations of the resulting
+prototype. Particular attention is given to evidence quality: direct
+observations are separated from inferences, and unavailable attacker
+attributes are never fabricated.
+
+\include{Chapters/chapter1}
+\include{Chapters/chapter2}
+\include{Chapters/chapter3}
+\include{Chapters/chapter4}
+\include{Chapters/chapter5}
+
+\chapter*{General Conclusion}
+\addcontentsline{toc}{chapter}{General Conclusion}
+JANUS demonstrates that AI-generated honey documents can be combined with
+endpoint and remote deception sensors in a coherent and testable pipeline. The
+generation subsystem creates several document families, selects an official
+token type appropriate to the requested format, validates the artifact before
+deployment, and records its identity and hash. The detection subsystem
+correlates Windows 4663 events with the active decoy registry and preserves raw
+evidence. The dashboard then separates local Wazuh detections from remote
+Canarytokens callbacks instead of merging unlike signals.
+
+The project also establishes clear limits. Wazuh observes the endpoint on
+which its agent and audit policy are active; it cannot follow a copied file on
+an unmanaged host. A public Canarytokens notification normally identifies a
+requesting network path, not a physical person or device. Office callbacks can
+be blocked, and AWS key alerts require actual API use. Within those limits, the
+validated prototype provides a sound basis for an academic demonstration and
+for future work on public webhook ingestion, distributed deployments, and
+measured deception effectiveness.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\appendix
+\chapter{Acceptance Test Summary}
+The complete operational procedure is maintained in
+\texttt{docs/MANUAL\_TEST\_GUIDE.md}. The minimum acceptance criteria are:
+\begin{enumerate}[label=\arabic*.]
+  \item the automated suite passes (98 tests and 7 subtests in the validated build);
+  \item Wazuh and forensic collectors report \texttt{running=true} without errors;
+  \item a DOCX read produces a correlated 4663 event and rule 100101/100104;
+  \item XLSX can produce both a local Wazuh signal and a remote Office token alert;
+  \item JSON produces the requested suffix and no false automatic-callback claim;
+  \item AWS decoy credentials alert only when presented to the AWS API;
+  \item secrets and live token material are absent from screenshots and Git.
+\end{enumerate}
+
+\end{document}

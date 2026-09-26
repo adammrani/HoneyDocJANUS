@@ -1,0 +1,222 @@
+\chapter{Implementation and Validation}
+
+\section{Introduction}
+
+JANUS is implemented in Python and PowerShell around an existing Wazuh
+single-node laboratory. FastAPI exposes the control surface, Streamlit provides
+the dashboard, SQLite stores the registry and evidence, and Docker runs the
+Wazuh manager, Indexer, and dashboard. The current validated host is Windows.
+
+\section{Project structure}
+
+\begin{lstlisting}[caption={Simplified JANUS source tree},label={lst:tree}]
+HoneyDocJANUS/
+|-- main.py
+|-- src/
+|   |-- alerting/        # FastAPI server and Streamlit dashboard
+|   |-- core/            # configuration, database, evidence, safety
+|   |-- janus/           # DOCX and multi-format generators
+|   |-- janus_v2/        # registry, Wazuh, telemetry, verdicts
+|   |-- lifecycle/       # atomic deployment and TTL rotation
+|   `-- tactical/        # prompt, LLM, coherence and scoring
+|-- scripts/             # setup, Wazuh rules, tests, start/stop
+|-- corpus/              # controlled financial, HR and technical context
+|-- data/shared/         # monitored deployment root (ignored by Git)
+|-- docs/
+`-- tests/
+\end{lstlisting}
+
+\section{Core implementation}
+
+\subsection{Startup and configuration}
+
+\texttt{main.py} initializes directories and the database, starts the FastAPI
+application, and conditionally starts the rotation manager and experimental
+components. Fake SSH/HTTP services and experimental prompt/credential layers
+remain disabled. On application startup, the Wazuh detection collector and the
+forensic collector are created only when their configuration is complete.
+
+Configuration is loaded from \texttt{.env}; the real file is ignored by Git.
+The API key protects administrative routes. Validation functions reject invalid
+intervals, missing provider configuration in fail-closed mode, and unsafe path
+settings.
+
+\subsection{AI content and safety gate}
+
+The tactical layer builds a business prompt from a controlled corpus. If a
+remote LLM key is configured, the model returns a narrative; otherwise a local
+fallback keeps the pipeline operational. The output passes a coherence check
+and forbidden-pattern scan. Token allocation happens only after this gate,
+which avoids wasting tokens or persisting external identifiers for rejected
+content.
+
+\subsection{DOCX assembly}
+
+The DOCX generator writes visible business content and inserts a non-macro
+Office beacon in the document footer. The OOXML contains one
+\texttt{INCLUDEPICTURE} field and one external image relationship whose target
+is the Word token URL. The final inspector opens the DOCX as a ZIP package and
+requires exactly one matching field and relationship, no VBA parts, and no
+visible JANUS fingerprint.
+
+\subsection{XLSX and structured formats}
+
+The accounting workbook generator creates balanced journal, income statement,
+balance-sheet, and budget data. The workbook uses supported table/filter
+structures and an external token reference that opens without Excel repair.
+CSV, JSON, YAML, ENV, and ZIP generators create format-valid content and embed
+only the token material allowed by policy. For cloud credentials, the provider's
+exact decoy key pair is used; fallback fake fields are not invented.
+
+\subsection{Deployment and registry}
+
+The path policy resolves a requested target and rejects traversal outside
+\texttt{JANUS\_DEPLOY\_ROOT}. The injector writes the artifact atomically,
+computes SHA-256, and persists the document and token transaction. Generated
+files, the database, logs, backups, and \texttt{.env} are excluded from Git.
+
+\section{Wazuh and evidence processing}
+
+PowerShell setup scripts configure the Windows audit subcategories, inherited
+SACL, Wazuh manager rules, and Indexer collector settings. The collector queries
+the configured rule set, handles overlap and search-after cursors, normalizes
+4663 access masks into read/modify/delete, matches paths against active decoys,
+and applies a deployment-grace suppression policy.
+
+Every accepted alert is stored with Wazuh identifiers, the normalized action,
+process, user, agent, verdict, raw JSON, and a canonical raw-evidence SHA-256.
+The Wazuh rule identifier is also normalized into a top-level field so the
+dashboard can display rules such as 100101 directly.
+
+\section{Dashboard}
+
+The Alert page intentionally presents two independent sections: local Wazuh
+detections and Canarytokens callbacks received by JANUS. In the public
+email-only configuration, the interface explains that provider emails are not
+copied into the local callback table. A non-blocking Streamlit fragment refreshes
+the alert view every five seconds without interfering with navigation.
+
+The HoneyDocs page displays safe metadata only. The Generate page keeps the
+dependent type and format selectors outside the submission form, preventing a
+stale DOCX value after choosing JSON. It also explains the activation condition
+before and after generation.
+
+\section{Automated validation}
+
+The final suite contains 98 tests and 7 subtests. It covers:
+
+\begin{itemize}
+  \item API authentication and callback rejection;
+  \item path traversal and deployment-root enforcement;
+  \item DOCX/XLSX beacon structure and absence of macros;
+  \item structured format validity and ZIP path safety;
+  \item Canarytokens provider selection and secret handling;
+  \item SQLite migrations, registry, raw-evidence hashes, and cursor behavior;
+  \item Wazuh parsing, collection, suppression, verdicts, and timelines;
+  \item dashboard navigation and non-blocking refresh;
+  \item local LLM fallback and coherence behavior.
+\end{itemize}
+
+The validated output is:
+
+\begin{lstlisting}[caption={Automated acceptance result},label={lst:pytest}]
+98 passed, 1 warning, 7 subtests passed
+\end{lstlisting}
+
+The remaining warning concerns a Starlette/httpx test-client deprecation and
+does not represent a functional failure.
+
+A final endurance check exposed contention between the Wazuh collector and the
+forensic-retention transaction in the shared SQLite database. The collector
+stores now use a common re-entrant writer lock, a 60-second busy timeout, and an
+immediate retention transaction. A concurrent-writer regression test was added.
+After an offline backup, bounded pruning, and vacuum, the database passed
+\texttt{quick\_check}, retained all 130 Wazuh detections, and both collectors
+completed successive polls with zero errors.
+
+\section{Live Windows and Wazuh validation}
+
+On 10 August 2026, the stack was restarted after a host reboot. Docker reported
+the Wazuh manager, Indexer, and dashboard as running. The JANUS API, dashboard,
+Wazuh collector, forensic collector, and Canarytokens provider all reported a
+healthy state.
+
+A controlled binary read of HoneyDoc 26 generated Windows Security event 4663.
+Wazuh applied rule 100101, described as a JANUS read/open candidate. The JANUS
+collector correlated the event with the active document and stored:
+
+\begin{itemize}
+  \item the audited object path and HoneyDoc identifier;
+  \item action \texttt{read} and access mask \texttt{0x1};
+  \item the PowerShell process and local test account;
+  \item Wazuh rule identifier 100101;
+  \item raw evidence and its SHA-256 hash;
+  \item a low verdict because no expected host or expected user was configured.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{wazuh-rule-100101.png}
+\caption{Wazuh document details showing JANUS rule 100101}
+\label{fig:wazuh-rule}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{wazuh-4663-fields.png}
+\caption{Event 4663 fields: object, process, access mask, and account}
+\label{fig:wazuh-fields}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{windows-sacl-4663-test.png}
+\caption{Inherited SACL and controlled Windows 4663 test}
+\label{fig:sacl-test}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{janus-telemetry-status.png}
+\caption{JANUS forensic telemetry status endpoint}
+\label{fig:telemetry-status}
+\end{figure}
+
+\section{Multi-format and Canarytokens validation}
+
+Manual tests produced valid DOCX, XLSX, JSON, and AWS ENV artifacts. The JSON
+selector defect was corrected and verified through the dashboard. An offline
+inspection of a newly generated DOCX confirmed one external Office relationship
+and no macro. Excel opened the corrected workbook without repair and generated
+a Canarytokens email containing a public source IP, provider geolocation, and
+the user-agent \texttt{Mozilla/4.0 (compatible; ms-office; MSOffice 16)}. The
+exact IP must be redacted in a public report.
+
+The AWS ENV test behaved differently by design. Opening the file produced a
+local Wazuh signal but no remote email. The official token is expected to alert
+only when the decoy keys are presented to the AWS API.
+
+\begin{table}[H]
+\centering
+\caption{Observed and expected acceptance results}
+\label{tab:acceptance-results}
+\small
+\begin{tabular}{p{0.22\linewidth}p{0.27\linewidth}p{0.27\linewidth}p{0.16\linewidth}}
+\toprule
+Scenario & Local Wazuh layer & Remote token layer & Result \\
+\midrule
+DOCX read & 4663 and read/open rule & Conditional on Word policy & Local validated; remote conditional \\
+XLSX opened & File access detected & Office email received & Validated \\
+JSON opened & File access detected & No automatic request & Validated behavior \\
+AWS ENV opened & File access detected & No activation expected & Validated behavior \\
+AWS keys used & Not required on remote host & AWS token email expected, delayed & Manual test to document \\
+Modify/delete & Rules 100102/100103 & Not applicable & Supported; repeat for final screenshots \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+The implementation satisfies the core requirements and demonstrates a complete
+local detection path. Remote activation remains format-dependent, which is a
+property of the sensors rather than a reason to invent uniform behavior.

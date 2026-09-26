@@ -1,0 +1,25 @@
+flowchart TD
+    req["Input<br/>type, format, scenario, TTL, target"]
+    api["alert_server.py<br/>authenticated request validation"]
+    path["path_policy.py<br/>authorized deployment target"]
+    context["context_analyzer.py<br/>controlled business context"]
+    llm["llm_engine.py<br/>remote LLM or local fallback"]
+    safety["artifact_safety.py + coherence_check.py<br/>reject unsafe or incoherent text"]
+    policy{"Token policy<br/>format + scenario"}
+    office["Official Office token"]
+    aws["Official AWS key token"]
+    web["Web breadcrumb or no automatic token"]
+    assemble["document_assembler.py / generators<br/>build requested format"]
+    inspect["Format-specific structural validation"]
+    deploy["injector.py<br/>atomic write + SHA-256"]
+    registry[("SQLite registry")]
+    output["Output<br/>active HoneyDoc in data/shared"]
+
+    req --> api --> path --> context --> llm --> safety --> policy
+    policy -->|"DOCX / XLSX"| office --> assemble
+    policy -->|"cloud credentials"| aws --> assemble
+    policy -->|"structured data"| web --> assemble
+    assemble --> inspect --> deploy
+    deploy --> registry
+    deploy --> output
+

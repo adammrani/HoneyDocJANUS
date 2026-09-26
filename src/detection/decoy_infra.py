@@ -15,39 +15,55 @@ Both are honeypots: they observe and report, they do not attack or grant access.
 """
 
 import json
+import hashlib
 import socket
 import threading
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
-import requests
-
-from src.core.config import get_settings
+from src.core.database import get_token_by_id, init_db, insert_alert
 from src.core.logger import log
-
-_settings = get_settings()
+from src.detection.canarytoken_handler import parse_callback
 
 _SSH_BANNER = b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4\r\n"
 
 
 def _notify_alert(trigger: str, src_ip: str, extra: dict) -> None:
-    """Best-effort POST to our own /alert endpoint. Never raises."""
+    """Persist a honeypot observation without trusting a public callback."""
+
+    token_id = str(extra.get("token_id") or trigger)
+    token_row = get_token_by_id(token_id)
+    honeydoc_id = token_row["honeydoc_id"] if token_row else None
+    user_agent = str(extra.get("user_agent") or trigger)
     payload = {
-        "token_id": extra.get("token_id", trigger),
+        "token_id": token_id,
         "src_ip": src_ip,
-        "user_agent": extra.get("user_agent", trigger),
+        "user_agent": user_agent,
         "trigger": trigger,
         "captured_at": datetime.now(timezone.utc).isoformat(),
         **extra,
     }
     try:
-        requests.post(
-            f"{_settings.CALLBACK_BASE_URL}/alert",
-            json=payload,
-            timeout=4,
+        enriched = parse_callback(payload)
+        insert_alert(
+            token_id=token_id,
+            honeydoc_id=honeydoc_id,
+            src_ip=src_ip,
+            user_agent=user_agent,
+            os_guess=enriched.get("os_guess"),
+            os_evidence_source=enriched.get("os_evidence_source", "none"),
+            os_confidence=enriched.get("os_confidence", "none"),
+            os_scope=enriched.get("os_scope", "unknown"),
+            browser_guess=enriched.get("browser_guess"),
+            raw_payload=payload,
+            sensor_source="janus_experimental_decoy_service",
+            evidence_nature="observed",
+            evidence_strength="direct",
+            transport_trust="direct_network_connection",
         )
-    except requests.RequestException as exc:
-        log.warning("decoy_infra: could not notify /alert (%s)", exc)
+    except Exception as exc:  # noqa: BLE001 - honeypot listener must survive
+        log.warning("decoy_infra: could not persist alert (%s)", exc)
 
 
 # ── Fake SSH ─────────────────────────────────────────────
@@ -76,11 +92,11 @@ def _handle_ssh_client(client: socket.socket, addr) -> None:
             pass
 
 
-def _run_ssh_server(port: int) -> None:
+def _run_ssh_server(bind_host: str, port: int) -> None:
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        srv.bind(("0.0.0.0", port))
+        srv.bind((bind_host, port))
         srv.listen(5)
         log.info("Decoy SSH listening on :%d", port)
     except OSError as exc:
@@ -104,15 +120,47 @@ class _DecoyHTTPHandler(BaseHTTPRequestHandler):
         pass
 
     def _capture(self) -> None:
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        try:
+            declared_length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            declared_length = 0
+        length = min(max(declared_length, 0), 16 * 1024)
+        self.connection.settimeout(5)
+        try:
+            body = self.rfile.read(length) if length else b""
+        except (socket.timeout, OSError):
+            body = b""
         src_ip = self.client_address[0]
         ua = self.headers.get("User-Agent", "")
-        log.warning("CI3 API probe from %s on %s body=%r", src_ip, self.path, body)
+        path = urlparse(self.path).path
+        parts = [part for part in path.split("/") if part]
+        token_id = (
+            parts[2]
+            if (
+                len(parts) == 3
+                and parts[:2] == ["api", "login"]
+                and len(parts[2]) <= 256
+            )
+            else ""
+        )
+        log.warning(
+            "CI3 API probe from %s on %s (bytes=%d token=%s)",
+            src_ip,
+            path,
+            declared_length,
+            token_id or "unattributed",
+        )
         _notify_alert(
             "CI3_API_PROBE",
             src_ip,
-            {"user_agent": ua, "path": self.path, "captured_body": body},
+            {
+                "token_id": token_id or "CI3_API_PROBE",
+                "user_agent": ua,
+                "path": path,
+                "body_size": declared_length,
+                "body_sha256": hashlib.sha256(body).hexdigest() if body else None,
+                "body_truncated": declared_length > length,
+            },
         )
 
     def do_POST(self) -> None:  # noqa: N802 (http.server naming)
@@ -130,9 +178,9 @@ class _DecoyHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"status": "ok"}).encode())
 
 
-def _run_http_server(port: int) -> None:
+def _run_http_server(bind_host: str, port: int) -> None:
     try:
-        httpd = HTTPServer(("0.0.0.0", port), _DecoyHTTPHandler)
+        httpd = ThreadingHTTPServer((bind_host, port), _DecoyHTTPHandler)
         log.info("Decoy HTTP listening on :%d", port)
         httpd.serve_forever()
     except OSError as exc:
@@ -141,11 +189,31 @@ def _run_http_server(port: int) -> None:
 
 # ── Public entrypoint ────────────────────────────────────
 
-def start_decoy_infra(http_port: int = 8080, ssh_port: int = 2222) -> None:
+def start_decoy_infra(
+    http_port: int = 8080,
+    ssh_port: int = 2222,
+    bind_host: str = "127.0.0.1",
+) -> None:
     """Launch both fake listeners in background daemon threads."""
-    threading.Thread(target=_run_ssh_server, args=(ssh_port,), daemon=True).start()
-    threading.Thread(target=_run_http_server, args=(http_port,), daemon=True).start()
-    log.info("Decoy infrastructure started (SSH:%d, HTTP:%d)", ssh_port, http_port)
+    init_db()
+    threading.Thread(
+        target=_run_ssh_server,
+        args=(bind_host, ssh_port),
+        name="janus-decoy-ssh",
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_http_server,
+        args=(bind_host, http_port),
+        name="janus-decoy-http",
+        daemon=True,
+    ).start()
+    log.info(
+        "Decoy infrastructure started on %s (SSH:%d, HTTP:%d)",
+        bind_host,
+        ssh_port,
+        http_port,
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,157 @@
+\chapter{Project Context and Problem Definition}
+
+\section{Introduction}
+
+Cybersecurity monitoring usually concentrates on production resources: user
+accounts, servers, business applications, and sensitive data. This produces a
+large volume of legitimate activity that analysts must distinguish from
+malicious behavior. Cyber deception changes this asymmetry by introducing
+resources that have no normal business use. When such a resource is accessed,
+the event deserves immediate investigation. NIST includes deception and
+honeytokens among the techniques that can support cyber-resilient systems
+\cite{nist800160v2}.
+
+JANUS focuses on a specific deception resource: the honey document. Examples
+include a financial workbook, an internal procedure, a technical configuration,
+or decoy cloud credentials. The file must be sufficiently plausible to attract
+an intruder, while remaining harmless and distinguishable from real data by the
+defender.
+
+\section{Problem statement}
+
+A static decoy file is easy to deploy, but it presents four practical
+limitations.
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Limited realism and diversity.} Reusing the same names and
+  content makes a deception environment easier to fingerprint.
+  \item \textbf{Incomplete observation.} A remote callback can show that a
+  token endpoint was contacted, but it does not by itself explain which local
+  account and process touched the file.
+  \item \textbf{Format-dependent activation.} A Word beacon, an Excel token,
+  a web breadcrumb, and AWS decoy credentials do not activate in the same way.
+  \item \textbf{Risk of unsupported conclusions.} An event may identify a
+  process or an egress IP without proving a person's identity, a device MAC
+  address, or a complete attack path.
+\end{enumerate}
+
+The central question is therefore:
+
+\begin{quote}
+How can a defensive platform generate credible and controlled honey documents,
+deploy them safely, and combine local and remote evidence to detect attacker
+interaction without fabricating unavailable attributes?
+\end{quote}
+
+\section{Research questions}
+
+The project is structured around the following questions:
+
+\begin{itemize}
+  \item How can an LLM vary business content without receiving local paths,
+  secrets, or live token material?
+  \item Which Canarytoken type is appropriate for each generated file format?
+  \item Which Windows and Wazuh fields are direct evidence of file access?
+  \item How can raw Wazuh evidence, normalized events, and verdicts remain
+  traceable to one HoneyDoc instance?
+  \item Which claims about the attacker are reliable, inferred, or impossible?
+\end{itemize}
+
+\section{Objectives}
+
+\subsection{Primary objective}
+
+The primary objective is to implement a reproducible MVP that joins four
+capabilities: AI-assisted content generation, format-specific tokenization,
+controlled deployment, and evidence correlation.
+
+\subsection{Functional objectives}
+
+\begin{itemize}
+  \item Generate financial, human-resources, technical, and cloud-credential
+  decoys in DOCX, XLSX, CSV, JSON, YAML, ENV, and ZIP formats.
+  \item Create official Canarytokens only after the content passes safety and
+  coherence checks.
+  \item Deploy files atomically under a single authorized root and record their
+  SHA-256 hashes in SQLite.
+  \item Detect local read, modification, and deletion events using Windows
+  auditing and Wazuh rules.
+  \item Preserve raw Wazuh alerts and expose normalized fields through an
+  authenticated API and dashboard.
+  \item State token activation conditions and sensor limitations in the user
+  interface.
+\end{itemize}
+
+\subsection{Security and quality objectives}
+
+The system must avoid macros by default, prevent path traversal, keep
+administrative routes behind an API key, avoid printing secret token material,
+and fail closed when the configured Canarytokens provider is unavailable.
+Tests must cover artifact structure, database migration, API security,
+deployment policy, token-provider behavior, Wazuh parsing, verdict generation,
+and dashboard navigation.
+
+\section{Scope and non-goals}
+
+The supported core contains the HoneyDoc pipeline, Wazuh, Canarytokens, SQLite,
+FastAPI, and Streamlit. Experimental fake SSH and HTTP services are excluded
+from the validated architecture because they depend on a later attacker choice
+to reuse exposed credentials; they do not improve the initial observation of a
+document interaction. Prompt-injection and credential-trap layers also remain
+disabled by default.
+
+The project is not a production SOC platform. It does not provide high
+availability, immutable storage, global endpoint coverage, attribution of a
+human identity, or retrieval of a remote MAC address. Wazuh observes only hosts
+on which an agent and the required audit policy are active. A Canarytokens hit
+can continue to work after a file leaves the monitored host, but its source IP
+may be a proxy, VPN, NAT gateway, or security service.
+
+\section{Methodology}
+
+The implementation followed an incremental engineering process:
+
+\begin{enumerate}[label=\arabic*.]
+  \item establish a minimal DOCX generation and callback flow;
+  \item configure a project-local monitored directory and inherited SACL;
+  \item validate Windows event 4663 and dedicated Wazuh rules;
+  \item generalize registration and correlation to every active HoneyDoc;
+  \item add XLSX and structured formats with explicit token policies;
+  \item integrate the official Canarytokens provider;
+  \item preserve raw and normalized evidence in SQLite;
+  \item add a unified dashboard and automated regression tests;
+  \item perform manual Office, Canary email, and end-to-end Wazuh tests.
+\end{enumerate}
+
+\section{Contributions}
+
+The main contributions of JANUS are:
+
+\begin{itemize}
+  \item a multi-format generation pipeline that separates narrative generation
+  from artifact assembly;
+  \item a token policy that reflects real activation semantics instead of
+  promising an automatic callback for every file;
+  \item an Office beacon implementation compatible with an external OOXML image
+  relationship and requiring no macro;
+  \item a local detection path from SACL and event 4663 to Wazuh and a JANUS
+  verdict;
+  \item a chain of evidence linking raw alert hashes, normalized signals, and
+  HoneyDoc registry entries;
+  \item a dashboard that visibly separates Wazuh observations from remote
+  Canarytokens callbacks.
+\end{itemize}
+
+\section{Report organization}
+
+Chapter 2 reviews the relevant deception, auditing, Wazuh, Canarytokens, and AI
+concepts. Chapter 3 defines requirements and presents the architecture. Chapter
+4 details the implementation and validation. Chapter 5 analyzes evidence
+quality, limitations, security hardening, and future work.
+
+\section{Conclusion}
+
+The project is motivated by a simple principle: a decoy is useful only when its
+interaction is observable and its evidence is interpreted honestly. The next
+chapter positions JANUS among the technologies that implement this principle.
+

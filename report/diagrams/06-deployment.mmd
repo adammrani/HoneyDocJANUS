@@ -1,0 +1,30 @@
+flowchart TB
+    subgraph workstation["Windows development / monitored workstation"]
+        source["HoneyDocJANUS source"]
+        api["FastAPI :8000"]
+        ui["Streamlit :8501"]
+        shared["data/shared<br/>inherited SACL"]
+        sqlite[("data/honeydocs.db")]
+        agent["Wazuh agent"]
+        source --> api
+        source --> ui
+        api --> shared
+        api --> sqlite
+        shared --> agent
+    end
+
+    subgraph docker["Docker Desktop - Wazuh single node"]
+        manager["Wazuh manager"]
+        indexer["Wazuh indexer :9200"]
+        wui["Wazuh dashboard :443"]
+        manager --> indexer --> wui
+    end
+
+    provider["Public Canarytokens service"]
+    email["Defender email"]
+
+    agent --> manager
+    indexer --> api
+    shared -. "Office/AWS activation" .-> provider
+    provider --> email
+

@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor Actor
+    participant file as HoneyDoc
+    participant win as Windows auditing
+    participant wazuh as Wazuh
+    participant janus as JANUS collector
+    participant db as Evidence registry
+    participant canary as Canarytokens
+    participant analyst as Defender
+
+    actor->>file: Interact with decoy
+    file->>win: Audited access right is exercised
+    win->>wazuh: Security event 4663 (+ optional context)
+    wazuh->>janus: Matching JANUS alert
+    janus->>janus: Match active path, normalize action, score verdict
+    janus->>db: Store raw alert, SHA-256, normalized signal
+    janus-->>analyst: Local dashboard detection
+    opt Format-specific remote activation
+        file-->>canary: Office request or AWS API key use
+        canary-->>analyst: Provider email / webhook
+    end
+    Note over analyst: Local and remote signals retain separate provenance
+

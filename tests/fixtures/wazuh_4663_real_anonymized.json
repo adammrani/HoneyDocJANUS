@@ -1,0 +1,50 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.07.19",
+  "_id": "anonymized-opensearch-id",
+  "_source": {
+    "agent": {
+      "id": "001",
+      "ip": "127.0.0.1",
+      "name": "JANUS-WINDOWS"
+    },
+    "manager": {
+      "name": "wazuh.manager"
+    },
+    "data": {
+      "win": {
+        "eventdata": {
+          "subjectLogonId": "0x123456",
+          "subjectDomainName": "LAB",
+          "objectServer": "Security",
+          "accessList": "%%4416",
+          "objectType": "File",
+          "processId": "0x42",
+          "processName": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "objectName": "C:\\HoneyDocJANUS\\data\\shared\\Budget_IA_2026.docx",
+          "accessMask": "0x1",
+          "subjectUserName": "analyst"
+        },
+        "system": {
+          "eventID": "4663",
+          "channel": "Security",
+          "systemTime": "2026-07-19T10:36:19.4287947Z",
+          "eventRecordID": "674776",
+          "computer": "LAB-WINDOWS",
+          "severityValue": "AUDIT_SUCCESS",
+          "providerName": "Microsoft-Windows-Security-Auditing"
+        }
+      }
+    },
+    "rule": {
+      "level": 8,
+      "description": "JANUS: Access to an audited decoy file.",
+      "groups": ["janus", "windows", "windows_security"],
+      "id": "100100"
+    },
+    "decoder": {
+      "name": "windows_eventchannel"
+    },
+    "id": "1784457380.648711",
+    "timestamp": "2026-07-19T10:36:20.446+0000"
+  }
+}

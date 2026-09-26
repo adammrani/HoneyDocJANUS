@@ -1,0 +1,38 @@
+flowchart LR
+    subgraph host["Monitored Windows endpoint"]
+        file["HoneyDoc<br/>data/shared"]
+        sacl["Inherited SACL"]
+        event["Security events<br/>4663 and context"]
+        agent["Wazuh agent"]
+        file --> sacl --> event --> agent
+    end
+
+    subgraph wazuh["Wazuh Docker single node"]
+        manager["Manager<br/>JANUS rules 100100-100130"]
+        indexer[("Indexer")]
+        wdash["Wazuh dashboard"]
+        manager --> indexer --> wdash
+    end
+
+    subgraph janus["JANUS application"]
+        collector["wazuh_collector.py<br/>direct detections"]
+        forensic["forensic_collector.py<br/>bounded context"]
+        normalize["correlation + verdict<br/>observed vs inferred"]
+        db[("SQLite<br/>raw + normalized evidence")]
+        dashboard["Streamlit dashboard"]
+        collector --> normalize
+        forensic --> normalize
+        normalize --> db --> dashboard
+    end
+
+    subgraph remote["Remote token layer"]
+        token["Canarytokens provider"]
+        notice["Email / authenticated webhook"]
+        token --> notice
+    end
+
+    agent --> manager
+    indexer --> collector
+    indexer --> forensic
+    file -. "format-specific activation" .-> token
+

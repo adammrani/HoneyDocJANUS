@@ -20,4 +20,4 @@ RUN mkdir -p data/deployed_docs
 
 EXPOSE 8000 8501 2222 8080
 
-CMD ["python", "src/main.py"]
+CMD ["python", "main.py"]

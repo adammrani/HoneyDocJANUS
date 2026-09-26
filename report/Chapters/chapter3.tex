@@ -1,0 +1,193 @@
+\chapter{Requirements, Design, and Architecture}
+
+\section{Introduction}
+
+This chapter translates the evidence and safety principles into an architecture
+that can be implemented and tested. The design separates preparation of the
+decoy from observation of an interaction, and it isolates format-dependent
+behavior behind explicit policies.
+
+\section{Actors and use cases}
+
+Three actors interact with the core system:
+
+\begin{itemize}
+  \item the \textbf{defender/operator}, who configures JANUS, generates decoys,
+  and investigates signals;
+  \item the \textbf{local or remote actor}, who discovers, opens, modifies,
+  moves, deletes, or uses a decoy;
+  \item external \textbf{sensor services}, namely Wazuh and Canarytokens, which
+  produce complementary evidence.
+\end{itemize}
+
+\plannedfigure{figures/system-context.png}
+{JANUS system context and external actors}{fig:system-context}
+
+\section{Functional requirements}
+
+\begin{table}[H]
+\centering
+\caption{Main functional requirements}
+\label{tab:functional-requirements}
+\small
+\begin{tabular}{p{0.12\linewidth}p{0.79\linewidth}}
+\toprule
+ID & Requirement \\
+\midrule
+FR-01 & Generate a HoneyDoc for an authorized business type and output format. \\
+FR-02 & Select a compatible official token type and document its activation condition. \\
+FR-03 & Reject unsafe, incoherent, or unsupported content before token creation and deployment. \\
+FR-04 & Restrict deployment to the configured project-local root. \\
+FR-05 & Register the artifact, token metadata, hash, TTL, and deployment path in SQLite. \\
+FR-06 & Collect Wazuh alerts, correlate them with active HoneyDocs, and normalize the action. \\
+FR-07 & Preserve raw evidence and a deterministic SHA-256 evidence hash. \\
+FR-08 & Display local Wazuh signals and remote Canarytokens callbacks separately. \\
+FR-09 & Support controlled token retirement and HoneyDoc rotation. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Non-functional requirements}
+
+\begin{itemize}
+  \item \textbf{Safety:} generated artifacts contain no real secret and no
+  macro; paths remain within the deployment root.
+  \item \textbf{Traceability:} every signal can be linked to a HoneyDoc and to
+  immutable raw evidence.
+  \item \textbf{Honesty:} fields distinguish direct observation, inference,
+  confidence, and unavailable data.
+  \item \textbf{Security:} administrative API routes require an API key;
+  secrets are excluded from Git and routine logs.
+  \item \textbf{Reproducibility:} a local content fallback and automated tests
+  keep the project runnable without a remote LLM.
+  \item \textbf{Maintainability:} generators, token policy, deployment,
+  collection, correlation, and presentation remain separate modules.
+\end{itemize}
+
+\section{Global architecture}
+
+The system is divided into five logical planes:
+
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Control plane:} FastAPI endpoints, authentication, configuration,
+  and the Streamlit operator interface.
+  \item \textbf{Generation plane:} corpus-based prompt construction, LLM or
+  fallback content, coherence checks, token policy, and artifact assemblers.
+  \item \textbf{Deployment plane:} authorized-path resolution, atomic writes,
+  hashing, TTL, and the SQLite registry.
+  \item \textbf{Observation plane:} Windows SACL/event 4663, Wazuh rules and
+  Indexer, remote Canarytokens, and optional Linux audit telemetry.
+  \item \textbf{Evidence plane:} raw alerts, normalized events, verdicts,
+  timelines, and dashboard views.
+\end{enumerate}
+
+\plannedfigure{figures/detection-architecture.png}
+{End-to-end JANUS generation and detection architecture}
+{fig:detection-architecture}
+
+\section{Generation pipeline}
+
+The API receives a document type, format, scenario, target subdirectory, and
+TTL. The deployment target is resolved before prompt construction so an
+untrusted path cannot escape the allowed root. The LLM receives only business
+context. Content is checked before a remote token is allocated. A deterministic
+assembler then creates the requested file and a final gate inspects its
+structure before deployment.
+
+\plannedfigure{figures/generation-pipeline.png}
+{Controlled HoneyDoc generation pipeline}{fig:generation-pipeline}
+
+\subsection{Supported format policy}
+
+\begin{table}[H]
+\centering
+\caption{Document types, formats, and remote activation}
+\label{tab:format-policy}
+\small
+\begin{tabular}{p{0.22\linewidth}p{0.25\linewidth}p{0.20\linewidth}p{0.24\linewidth}}
+\toprule
+Document type & Formats & Token & Remote trigger \\
+\midrule
+Financial report & DOCX, XLSX, CSV, JSON & Word, Excel, or web & Office external content or breadcrumb use \\
+HR document & DOCX, CSV, JSON & Word or web & Office external content or breadcrumb use \\
+Technical configuration & DOCX, ENV, YAML, JSON, ZIP & Word or web & Office external content or breadcrumb use \\
+Cloud credentials & ENV, YAML, JSON, ZIP & AWS keys & Decoy key used with AWS API \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Local detection design}
+
+The monitored directory is \texttt{data/shared}. A SACL entry inherited by
+children requests successful audit events for read, create/write, append, and
+delete rights. The Wazuh agent collects the Windows Security channel and the
+manager applies rules scoped to this path.
+
+\begin{table}[H]
+\centering
+\caption{JANUS Wazuh rule taxonomy}
+\label{tab:wazuh-rules}
+\small
+\begin{tabular}{p{0.15\linewidth}p{0.28\linewidth}p{0.48\linewidth}}
+\toprule
+Rule & Normalized meaning & Interpretation \\
+\midrule
+100100 & Generic audited access & A 4663 event targets the monitored decoy root. \\
+100101 & Read/open candidate & ReadData or equivalent was exercised. \\
+100102 & Modification & WriteData or AppendData was exercised. \\
+100103 & Deletion & Delete rights were exercised. \\
+100104 & Office/PDF open candidate & A relevant application accessed the decoy. \\
+100110 & Windows logon context & Candidate session context for correlation. \\
+100111 & SMB access context & Candidate remote file-share context. \\
+100112 & Process context & Relevant Windows process execution. \\
+100130 & Linux command context & auditd/execve command signal. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Interaction sequence}
+
+The sequence begins when an actor touches an active decoy. Windows emits the
+audit event, the agent forwards it, Wazuh classifies it, and the JANUS collector
+stores both raw and normalized evidence. Independently, a supported remote
+token may activate. These paths can have different delays and are not forced
+into one synthetic event.
+
+\plannedfigure{figures/interaction-sequence.png}
+{Sequence of a HoneyDoc interaction and evidence collection}
+{fig:interaction-sequence}
+
+\section{Registry and evidence model}
+
+SQLite stores four related concepts:
+
+\begin{itemize}
+  \item a \textbf{HoneyDoc} instance with filename, path, type, format, hash,
+  creation time, TTL, and active state;
+  \item a \textbf{token} with provider, type, activation mode, callback metadata,
+  and lifecycle state;
+  \item a \textbf{Wazuh detection} with the Wazuh document/event identifiers,
+  rule identifier, normalized action, process, user, and verdict;
+  \item \textbf{raw evidence and security signals} linked by a canonical
+  SHA-256 hash and correlation keys.
+\end{itemize}
+
+\plannedfigure{figures/evidence-data-model.png}
+{Simplified registry and evidence data model}{fig:evidence-data-model}
+
+\section{Trust boundaries and safeguards}
+
+The principal trust boundaries are the LLM API, public Canarytokens service,
+Wazuh Indexer, monitored filesystem, and administrative API. The LLM never
+receives token secrets or the deployment path. The public token service receives
+only the information required to create a token. Indexer credentials and the
+JANUS API key remain in \texttt{.env}. Administrative responses avoid exposing
+auth tokens and cloud secret material. The public webhook remains disabled
+until a real HTTPS endpoint can authenticate and receive it.
+
+\section{Conclusion}
+
+The architecture treats generation, deployment, and observation as separate
+security domains connected by explicit data contracts. Chapter 4 describes the
+implementation and shows that these contracts hold in automated and live tests.
+

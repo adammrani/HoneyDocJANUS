@@ -1,0 +1,53 @@
+erDiagram
+    HONEYDOC ||--o| TOKEN : embeds
+    HONEYDOC ||--o{ WAZUH_DETECTION : matches
+    HONEYDOC ||--o{ SECURITY_SIGNAL : correlates
+    WAZUH_DETECTION ||--|| RAW_EVIDENCE : preserves
+
+    HONEYDOC {
+        integer id PK
+        string filename
+        string deployed_path
+        string document_type
+        string output_format
+        string sha256
+        datetime created_at
+        integer ttl_seconds
+        boolean active
+    }
+    TOKEN {
+        integer id PK
+        string provider
+        string token_type
+        string activation_mode
+        string state
+    }
+    WAZUH_DETECTION {
+        integer id PK
+        integer honeydoc_id FK
+        string wazuh_document_id
+        string windows_event_id
+        string wazuh_rule_id
+        string action
+        string object_path
+        string process_name
+        string subject_user
+        string verdict
+        string raw_sha256
+    }
+    RAW_EVIDENCE {
+        integer id PK
+        string source
+        string canonical_sha256
+        text payload_json
+        datetime observed_at
+    }
+    SECURITY_SIGNAL {
+        integer id PK
+        integer honeydoc_id FK
+        string source
+        string classification
+        string confidence
+        string evidence_sha256
+    }
+

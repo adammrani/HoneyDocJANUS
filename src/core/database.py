@@ -18,6 +18,13 @@ from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 from src.core.config import get_settings
+from src.core.evidence import canonical_json, payload_sha256
+from src.janus_v2.registry.wazuh_detection_store import (
+    SqliteWazuhDetectionStore,
+)
+from src.janus_v2.registry.security_signal_store import (
+    SqliteSecuritySignalStore,
+)
 
 _settings = get_settings()
 
@@ -26,11 +33,16 @@ _settings = get_settings()
 def get_conn() -> Iterator[sqlite3.Connection]:
     """Yield a SQLite connection with Row factory, committing on success."""
     _settings.ensure_dirs()
-    conn = sqlite3.connect(_settings.DB_PATH)
+    conn = sqlite3.connect(_settings.DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 60000")
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -40,8 +52,10 @@ def _now() -> str:
 
 
 def init_db() -> None:
-    """Create the three tables if they do not already exist."""
+    """Create the application and Wazuh detection tables."""
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS honeydocs (
@@ -52,7 +66,9 @@ def init_db() -> None:
                 target_dir  TEXT,
                 created_at  TEXT    NOT NULL,
                 ttl_hours   INTEGER NOT NULL DEFAULT 72,
-                active      INTEGER NOT NULL DEFAULT 1
+                active      INTEGER NOT NULL DEFAULT 1,
+                retired_at  TEXT,
+                retirement_reason TEXT
             );
 
             CREATE TABLE IF NOT EXISTS tokens (
@@ -61,6 +77,13 @@ def init_db() -> None:
                 token_id      TEXT NOT NULL,
                 token_url     TEXT,
                 callback_url  TEXT,
+                provider      TEXT NOT NULL DEFAULT 'local',
+                token_type    TEXT NOT NULL DEFAULT 'web',
+                auth_token    TEXT NOT NULL DEFAULT '',
+                activation_mode TEXT NOT NULL DEFAULT '',
+                revoked_at    TEXT,
+                revocation_status TEXT NOT NULL DEFAULT 'active',
+                revocation_error TEXT,
                 created_at    TEXT NOT NULL,
                 FOREIGN KEY (honeydoc_id) REFERENCES honeydocs (id)
             );
@@ -75,12 +98,85 @@ def init_db() -> None:
                 geo_country   TEXT,
                 geo_city      TEXT,
                 os_guess      TEXT,
+                os_evidence_source TEXT,
+                os_confidence TEXT,
+                os_scope      TEXT,
                 browser_guess TEXT,
                 raw_payload   TEXT,
+                raw_payload_sha256 TEXT NOT NULL DEFAULT '',
+                sensor_source TEXT NOT NULL DEFAULT 'unknown',
+                evidence_nature TEXT NOT NULL DEFAULT 'reported',
+                evidence_strength TEXT NOT NULL DEFAULT 'candidate',
+                transport_trust TEXT NOT NULL DEFAULT 'unverified',
                 FOREIGN KEY (honeydoc_id) REFERENCES honeydocs (id)
             );
+
+            CREATE INDEX IF NOT EXISTS idx_honeydocs_active_filepath
+                ON honeydocs (active, filepath);
+            CREATE INDEX IF NOT EXISTS idx_tokens_token_id
+                ON tokens (token_id);
+            CREATE INDEX IF NOT EXISTS idx_alerts_triggered_at
+                ON alerts (triggered_at DESC);
             """
         )
+
+        # Migration additive et idempotente pour les bases JANUS déjà créées.
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(honeydocs)").fetchall()
+        }
+        migrations = {
+            "file_format": "TEXT NOT NULL DEFAULT 'docx'",
+            "scenario": "TEXT NOT NULL DEFAULT ''",
+            "sha256": "TEXT NOT NULL DEFAULT ''",
+            "generator_version": "TEXT NOT NULL DEFAULT ''",
+            "retired_at": "TEXT",
+            "retirement_reason": "TEXT",
+        }
+        for column, definition in migrations.items():
+            if column not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE honeydocs ADD COLUMN {column} {definition}"
+                )
+
+        token_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(tokens)").fetchall()
+        }
+        token_migrations = {
+            "provider": "TEXT NOT NULL DEFAULT 'local'",
+            "token_type": "TEXT NOT NULL DEFAULT 'web'",
+            "auth_token": "TEXT NOT NULL DEFAULT ''",
+            "activation_mode": "TEXT NOT NULL DEFAULT ''",
+            "revoked_at": "TEXT",
+            "revocation_status": "TEXT NOT NULL DEFAULT 'active'",
+            "revocation_error": "TEXT",
+        }
+        for column, definition in token_migrations.items():
+            if column not in token_columns:
+                conn.execute(
+                    f"ALTER TABLE tokens ADD COLUMN {column} {definition}"
+                )
+
+        alert_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(alerts)").fetchall()
+        }
+        alert_migrations = {
+            "os_evidence_source": "TEXT NOT NULL DEFAULT 'none'",
+            "os_confidence": "TEXT NOT NULL DEFAULT 'none'",
+            "os_scope": "TEXT NOT NULL DEFAULT 'unknown'",
+            "raw_payload_sha256": "TEXT NOT NULL DEFAULT ''",
+            "sensor_source": "TEXT NOT NULL DEFAULT 'unknown'",
+            "evidence_nature": "TEXT NOT NULL DEFAULT 'reported'",
+            "evidence_strength": "TEXT NOT NULL DEFAULT 'candidate'",
+            "transport_trust": "TEXT NOT NULL DEFAULT 'unverified'",
+        }
+        for column, definition in alert_migrations.items():
+            if column not in alert_columns:
+                conn.execute(
+                    f"ALTER TABLE alerts ADD COLUMN {column} {definition}"
+                )
+
+    SqliteWazuhDetectionStore(_settings.DB_PATH).initialize()
+    SqliteSecuritySignalStore(_settings.DB_PATH).initialize()
 
 
 # ── honeydocs ────────────────────────────────────────────
@@ -91,16 +187,32 @@ def insert_honeydoc(
     doc_type: str,
     target_dir: str = "",
     ttl_hours: int = 72,
+    file_format: str = "docx",
+    scenario: str = "",
+    sha256: str = "",
+    generator_version: str = "",
 ) -> int:
     """Insert a honeydoc row and return its new id."""
     with get_conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO honeydocs
-                (filename, filepath, doc_type, target_dir, created_at, ttl_hours, active)
-            VALUES (?, ?, ?, ?, ?, ?, 1)
+                (filename, filepath, doc_type, target_dir, created_at, ttl_hours,
+                 active, file_format, scenario, sha256, generator_version)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             """,
-            (filename, filepath, doc_type, target_dir, _now(), ttl_hours),
+            (
+                filename,
+                filepath,
+                doc_type,
+                target_dir,
+                _now(),
+                ttl_hours,
+                file_format,
+                scenario,
+                sha256,
+                generator_version,
+            ),
         )
         return int(cur.lastrowid)
 
@@ -108,7 +220,24 @@ def insert_honeydoc(
 def list_honeydocs() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM honeydocs ORDER BY created_at DESC"
+            """
+            SELECT
+                h.*,
+                t.provider AS token_provider,
+                t.token_type AS token_type,
+                t.activation_mode AS token_activation,
+                t.revocation_status AS token_status
+            FROM honeydocs AS h
+            LEFT JOIN tokens AS t
+                ON t.id = (
+                    SELECT latest.id
+                    FROM tokens AS latest
+                    WHERE latest.honeydoc_id = h.id
+                    ORDER BY latest.id DESC
+                    LIMIT 1
+                )
+            ORDER BY h.created_at DESC
+            """
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -116,15 +245,41 @@ def list_honeydocs() -> list[dict]:
 def list_active_honeydocs() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM honeydocs WHERE active = 1 ORDER BY created_at DESC"
+            """
+            SELECT
+                h.*,
+                t.provider AS token_provider,
+                t.token_type AS token_type,
+                t.activation_mode AS token_activation,
+                t.revocation_status AS token_status
+            FROM honeydocs AS h
+            LEFT JOIN tokens AS t
+                ON t.id = (
+                    SELECT latest.id
+                    FROM tokens AS latest
+                    WHERE latest.honeydoc_id = h.id
+                    ORDER BY latest.id DESC
+                    LIMIT 1
+                )
+            WHERE h.active = 1
+            ORDER BY h.created_at DESC
+            """
         ).fetchall()
         return [dict(r) for r in rows]
 
 
-def deactivate_honeydoc(honeydoc_id: int) -> None:
+def deactivate_honeydoc(
+    honeydoc_id: int,
+    reason: str = "retired",
+) -> None:
     with get_conn() as conn:
         conn.execute(
-            "UPDATE honeydocs SET active = 0 WHERE id = ?", (honeydoc_id,)
+            """
+            UPDATE honeydocs
+            SET active = 0, retired_at = ?, retirement_reason = ?
+            WHERE id = ?
+            """,
+            (_now(), reason, honeydoc_id),
         )
 
 
@@ -135,15 +290,32 @@ def insert_token(
     token_id: str,
     token_url: str,
     callback_url: str,
+    provider: str = "local",
+    token_type: str = "web",
+    auth_token: str = "",
+    activation_mode: str = "",
 ) -> int:
     with get_conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO tokens
-                (honeydoc_id, token_id, token_url, callback_url, created_at)
-            VALUES (?, ?, ?, ?, ?)
+                (
+                    honeydoc_id, token_id, token_url, callback_url,
+                    provider, token_type, auth_token, activation_mode, created_at
+                )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (honeydoc_id, token_id, token_url, callback_url, _now()),
+            (
+                honeydoc_id,
+                token_id,
+                token_url,
+                callback_url,
+                provider,
+                token_type,
+                auth_token,
+                activation_mode,
+                _now(),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -160,6 +332,54 @@ def get_token_by_id(token_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+def get_active_token_by_id(token_id: str) -> Optional[dict]:
+    """Return a token only while its HoneyDoc remains active and unrevoked."""
+    if not token_id:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT t.*
+            FROM tokens AS t
+            JOIN honeydocs AS h ON h.id = t.honeydoc_id
+            WHERE t.token_id = ?
+              AND h.active = 1
+              AND t.revoked_at IS NULL
+            ORDER BY t.id DESC
+            LIMIT 1
+            """,
+            (token_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_token_by_honeydoc_id(honeydoc_id: int) -> Optional[dict]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM tokens WHERE honeydoc_id = ? ORDER BY id DESC LIMIT 1",
+            (honeydoc_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def mark_token_revocation(
+    token_id: str,
+    *,
+    status: str,
+    error: str | None = None,
+) -> None:
+    revoked_at = _now() if status == "revoked" else None
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE tokens
+            SET revoked_at = ?, revocation_status = ?, revocation_error = ?
+            WHERE token_id = ?
+            """,
+            (revoked_at, status, error, token_id),
+        )
+
+
 # ── alerts ───────────────────────────────────────────────
 
 def insert_alert(
@@ -170,16 +390,28 @@ def insert_alert(
     geo_country: Optional[str] = None,
     geo_city: Optional[str] = None,
     os_guess: Optional[str] = None,
+    os_evidence_source: str = "none",
+    os_confidence: str = "none",
+    os_scope: str = "unknown",
     browser_guess: Optional[str] = None,
     raw_payload: Optional[dict] = None,
+    sensor_source: str = "unknown",
+    evidence_nature: str = "reported",
+    evidence_strength: str = "candidate",
+    transport_trust: str = "unverified",
 ) -> int:
+    raw_value = raw_payload or {}
+    raw_json = canonical_json(raw_value)
     with get_conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO alerts
                 (token_id, honeydoc_id, triggered_at, src_ip, user_agent,
-                 geo_country, geo_city, os_guess, browser_guess, raw_payload)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 geo_country, geo_city, os_guess, os_evidence_source,
+                 os_confidence, os_scope, browser_guess, raw_payload,
+                 raw_payload_sha256, sensor_source, evidence_nature,
+                 evidence_strength, transport_trust)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 token_id,
@@ -190,8 +422,16 @@ def insert_alert(
                 geo_country,
                 geo_city,
                 os_guess,
+                os_evidence_source,
+                os_confidence,
+                os_scope,
                 browser_guess,
-                json.dumps(raw_payload or {}, ensure_ascii=False),
+                raw_json,
+                payload_sha256(raw_value),
+                sensor_source,
+                evidence_nature,
+                evidence_strength,
+                transport_trust,
             ),
         )
         return int(cur.lastrowid)

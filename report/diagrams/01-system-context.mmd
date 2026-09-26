@@ -1,0 +1,18 @@
+flowchart LR
+    operator["Defender / operator"]
+    actor["Actor interacting with a HoneyDoc"]
+    janus["JANUS<br/>generation, registry, evidence, dashboard"]
+    endpoint["Monitored endpoint<br/>data/shared"]
+    wazuh["Wazuh<br/>agent, manager, indexer"]
+    canary["Official Canarytokens service"]
+    mail["Defender email or authenticated webhook"]
+
+    operator -->|"authenticated generation request"| janus
+    janus -->|"validated HoneyDoc"| endpoint
+    actor -->|"read / modify / move / delete"| endpoint
+    endpoint -->|"audited host events"| wazuh
+    wazuh -->|"raw alerts"| janus
+    actor -.->|"Office external content or AWS key use"| canary
+    canary -->|"remote activation alert"| mail
+    janus -->|"local evidence and status"| operator
+

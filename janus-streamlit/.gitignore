@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.streamlit/secrets.toml
+.env
+data/*.sqlite3
+data/*.sqlite3-*
+data/*.docx
+data/generated/
+data/logs/
+data/janus_rules.xml
+data/windows-audit-backups/
+htmlcov/
+.coverage

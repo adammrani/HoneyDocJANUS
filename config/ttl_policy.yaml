@@ -3,6 +3,7 @@ ttl_hours:
   financial_report: 72
   hr_document: 120
   technical_config: 48
+  cloud_credentials: 24
   default: 72
 
 # Intervalle de vérification de la rotation (minutes).

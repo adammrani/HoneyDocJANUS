@@ -2,6 +2,8 @@
 .env
 *.env
 !.env.example
+.env.backup-*
+backups/
 
 # Python
 __pycache__/
@@ -40,3 +42,11 @@ Thumbs.db
 *.xlsx
 *.pdf
 *.zip
+
+# Local project archives / previous implementations
+_handoff/
+_handoff_complete/
+janus-next/
+
+# Generated document QA renders
+deliverables/janus-redemarrage/_qa/
